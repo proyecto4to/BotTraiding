@@ -13,4 +13,7 @@ COPY services/gateway services/gateway
 
 WORKDIR /app/services/gateway
 EXPOSE 8000
+COPY services/gateway/docker-entrypoint.sh /app/services/gateway/docker-entrypoint.sh
+RUN chmod +x /app/services/gateway/docker-entrypoint.sh
+ENTRYPOINT ["/app/services/gateway/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

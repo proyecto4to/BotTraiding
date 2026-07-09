@@ -13,4 +13,7 @@ COPY services/risk-engine services/risk-engine
 
 WORKDIR /app/services/risk-engine
 EXPOSE 8000
+COPY services/risk-engine/docker-entrypoint.sh /app/services/risk-engine/docker-entrypoint.sh
+RUN chmod +x /app/services/risk-engine/docker-entrypoint.sh
+ENTRYPOINT ["/app/services/risk-engine/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

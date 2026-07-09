@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-strategies"
+version = "0.1.0"
+description = "Shared strategy plugin library (Fase 5/6): registry + builtin strategies for TradingPlatform"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "numpy>=1.26",
+    "trading-contracts",
+]
+
+[tool.setuptools.packages.find]
+include = ["trading_strategies*"]

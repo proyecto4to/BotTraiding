@@ -1,13 +1,48 @@
-"""strategy-engine service - Fase 1 skeleton (sin logica de negocio).
+"""strategy-engine service (Fase 5/6).
 
-Responsabilidad (docs/ARCHITECTURE.md seccion 3): Carga plugins de estrategia, evalua condiciones, emite TradeSignal
+Responsabilidad (docs/ARCHITECTURE.md seccion 3): carga plugins de
+estrategia, evalua condiciones y emite TradeSignal. Las estrategias solo
+PROPONEN; el Risk Engine decide (principio 3).
+
+Startup: discovers the shared trading_strategies registry (import time)
+and syncs it into the DB (lifespan) - code registry is the source of
+truth for code/metadata, the DB owns enable/disable state and per-user
+configs.
 """
+
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from . import db as db_module
+from .api import router
+from .registry import registry
+from .sync import sync_registry
+
 SERVICE_NAME = "strategy-engine"
 
-app = FastAPI(title="strategy-engine", version="0.1.0")
+logger = logging.getLogger(SERVICE_NAME)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        with db_module.SessionLocal() as session:
+            count = sync_registry(session, registry)
+        logger.info("startup sync complete: %d strategies", count)
+    except Exception:  # noqa: BLE001
+        # The service can still serve registry metadata from code; the
+        # entrypoint runs `alembic upgrade head` before uvicorn, so this
+        # normally only happens when Postgres is temporarily unavailable.
+        logger.exception("startup registry->DB sync failed")
+    yield
+
+
+app = FastAPI(title=SERVICE_NAME, version="0.2.0", lifespan=lifespan)
+app.include_router(router)
 
 
 @app.get("/health")
@@ -18,9 +53,9 @@ def health() -> dict:
 
 @app.get("/ready")
 def ready() -> dict:
-    """Readiness probe: the service is ready to receive traffic.
-
-    Fase 1: no dependency checks wired yet (no business logic per
-    docs/ARCHITECTURE.md section 11); this always reports ready.
-    """
-    return {"status": "ready", "service": SERVICE_NAME}
+    """Readiness probe: registry loaded and ready to receive traffic."""
+    return {
+        "status": "ready",
+        "service": SERVICE_NAME,
+        "strategies_loaded": len(registry),
+    }

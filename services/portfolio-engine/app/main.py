@@ -1,13 +1,33 @@
-"""portfolio-engine service - Fase 1 skeleton (sin logica de negocio).
+"""portfolio-engine service - Fase 7.
 
-Responsabilidad (docs/ARCHITECTURE.md seccion 3): Estado de cuenta: exposicion, margen, correlacion, PnL, drawdown
+Responsabilidad (docs/ARCHITECTURE.md seccion 3): estado de cuenta por
+account_id: posiciones, cash, margen, PnL realizado/no realizado,
+exposicion por simbolo/sector/moneda, matriz de correlacion de posiciones
+abiertas y drawdown (peak-equity + flotante).
+
+Consumido de forma sincrona por risk-engine (GET /portfolio/{account_id})
+y alimentado por execution-engine (POST /portfolio/{account_id}/executions).
 """
 
-from fastapi import FastAPI
+from __future__ import annotations
+
+from fastapi import Depends, FastAPI
+from sqlalchemy.orm import Session
+
+from app import portfolio
+from app.db import get_db
+from app.schemas import (
+    DrawdownReport,
+    ExecutionIngest,
+    ExecutionIngestResult,
+    ExposureReport,
+    MarkRequest,
+    PortfolioState,
+)
 
 SERVICE_NAME = "portfolio-engine"
 
-app = FastAPI(title="portfolio-engine", version="0.1.0")
+app = FastAPI(title="portfolio-engine", version="0.2.0")
 
 
 @app.get("/health")
@@ -18,9 +38,46 @@ def health() -> dict:
 
 @app.get("/ready")
 def ready() -> dict:
-    """Readiness probe: the service is ready to receive traffic.
-
-    Fase 1: no dependency checks wired yet (no business logic per
-    docs/ARCHITECTURE.md section 11); this always reports ready.
-    """
+    """Readiness probe: the service is ready to receive traffic."""
     return {"status": "ready", "service": SERVICE_NAME}
+
+
+@app.get("/portfolio/{account_id}", response_model=PortfolioState)
+def get_portfolio(account_id: str, db: Session = Depends(get_db)) -> PortfolioState:
+    """Full portfolio snapshot: account state, open positions, marks,
+    injected return series, exposure, correlation matrix and drawdown."""
+    state = portfolio.build_state(db, account_id)
+    db.commit()  # account row may have been auto-created
+    return state
+
+
+@app.get("/portfolio/{account_id}/exposure", response_model=ExposureReport)
+def get_exposure(account_id: str, db: Session = Depends(get_db)) -> ExposureReport:
+    report = portfolio.build_exposure(db, account_id)
+    db.commit()
+    return report
+
+
+@app.get("/portfolio/{account_id}/drawdown", response_model=DrawdownReport)
+def get_drawdown(account_id: str, db: Session = Depends(get_db)) -> DrawdownReport:
+    report = portfolio.build_drawdown(db, account_id)
+    db.commit()
+    return report
+
+
+@app.post("/portfolio/{account_id}/executions", response_model=ExecutionIngestResult)
+def ingest_execution(
+    account_id: str, ingest: ExecutionIngest, db: Session = Depends(get_db)
+) -> ExecutionIngestResult:
+    """Ingest an ExecutionReport (execution-engine callback): updates the
+    position, cash, realized PnL and peak equity."""
+    return portfolio.apply_execution(db, account_id, ingest)
+
+
+@app.post("/portfolio/{account_id}/mark", response_model=PortfolioState)
+def mark_portfolio(
+    account_id: str, mark: MarkRequest, db: Session = Depends(get_db)
+) -> PortfolioState:
+    """Update marks (and optionally injected return series) then recompute
+    unrealized PnL, floating drawdown and peak equity."""
+    return portfolio.apply_mark(db, account_id, mark)
