@@ -1,0 +1,53 @@
+# Fase 1: base manifest only, no autoscaling/production tuning
+# (docs/ARCHITECTURE.md section 11).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: strategy-engine
+  namespace: tradingplatform
+  labels:
+    app: strategy-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: strategy-engine
+  template:
+    metadata:
+      labels:
+        app: strategy-engine
+    spec:
+      containers:
+        - name: strategy-engine
+          image: tradingplatform/strategy-engine:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: tradingplatform-env
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: strategy-engine
+  namespace: tradingplatform
+  labels:
+    app: strategy-engine
+spec:
+  selector:
+    app: strategy-engine
+  ports:
+    - port: 8000
+      targetPort: 8000

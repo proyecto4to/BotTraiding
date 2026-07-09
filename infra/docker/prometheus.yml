@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Fase 1: services expose /health and /ready only, no /metrics yet.
+  # This scrape config is a placeholder for when metrics are added.

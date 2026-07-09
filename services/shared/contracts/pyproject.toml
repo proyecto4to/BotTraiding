@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-contracts"
+version = "0.1.0"
+description = "Shared typed contracts (Fase 1: stubs, sin logica) for TradingPlatform services"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "python-jose[cryptography]>=3.3,<4.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["trading_contracts*"]

@@ -1,0 +1,344 @@
+# TradingPlatform - Fase 1 local development stack.
+# Brings up infrastructure (postgres, redis, nats, loki, prometheus, grafana)
+# plus every Python service skeleton. No trading logic runs here.
+#
+# Usage:
+#   1. cp infra/docker/.env.example infra/docker/.env  (fill in real values)
+#   2. docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env up --build
+# auth-service applies its Alembic migration automatically on container start
+# (see services/auth-service/docker-entrypoint.sh) — no manual `alembic upgrade
+# head` step needed against the compose Postgres.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD: trading
+      POSTGRES_DB: tradingplatform
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+
+  loki:
+    image: grafana/loki:2.9.6
+    ports:
+      - "3100:3100"
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    depends_on:
+      - prometheus
+      - loki
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: services/gateway/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      SERVICE_NAME: gateway
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  auth-service:
+    build:
+      context: ../..
+      dockerfile: services/auth-service/Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      SERVICE_NAME: auth-service
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in infra/docker/.env, see .env.example}
+      ACCESS_TOKEN_EXPIRE_MINUTES: "15"
+      REFRESH_TOKEN_EXPIRE_DAYS: "7"
+      MFA_PENDING_TOKEN_EXPIRE_MINUTES: "5"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:8001/auth/oauth/google/callback}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  strategy-engine:
+    build:
+      context: ../..
+      dockerfile: services/strategy-engine/Dockerfile
+    ports:
+      - "8002:8000"
+    environment:
+      SERVICE_NAME: strategy-engine
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  risk-engine:
+    build:
+      context: ../..
+      dockerfile: services/risk-engine/Dockerfile
+    ports:
+      - "8003:8000"
+    environment:
+      SERVICE_NAME: risk-engine
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  portfolio-engine:
+    build:
+      context: ../..
+      dockerfile: services/portfolio-engine/Dockerfile
+    ports:
+      - "8004:8000"
+    environment:
+      SERVICE_NAME: portfolio-engine
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  ai-engine:
+    build:
+      context: ../..
+      dockerfile: services/ai-engine/Dockerfile
+    ports:
+      - "8005:8000"
+    environment:
+      SERVICE_NAME: ai-engine
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  execution-engine:
+    build:
+      context: ../..
+      dockerfile: services/execution-engine/Dockerfile
+    ports:
+      - "8006:8000"
+    environment:
+      SERVICE_NAME: execution-engine
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  broker-connectors:
+    build:
+      context: ../..
+      dockerfile: services/broker-connectors/Dockerfile
+    ports:
+      - "8007:8000"
+    environment:
+      SERVICE_NAME: broker-connectors
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  backtester:
+    build:
+      context: ../..
+      dockerfile: services/backtester/Dockerfile
+    ports:
+      - "8008:8000"
+    environment:
+      SERVICE_NAME: backtester
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  optimizer:
+    build:
+      context: ../..
+      dockerfile: services/optimizer/Dockerfile
+    ports:
+      - "8009:8000"
+    environment:
+      SERVICE_NAME: optimizer
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  paper-trading:
+    build:
+      context: ../..
+      dockerfile: services/paper-trading/Dockerfile
+    ports:
+      - "8010:8000"
+    environment:
+      SERVICE_NAME: paper-trading
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  notification-service:
+    build:
+      context: ../..
+      dockerfile: services/notification-service/Dockerfile
+    ports:
+      - "8011:8000"
+    environment:
+      SERVICE_NAME: notification-service
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  scheduler:
+    build:
+      context: ../..
+      dockerfile: services/scheduler/Dockerfile
+    ports:
+      - "8012:8000"
+    environment:
+      SERVICE_NAME: scheduler
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  trading-engine:
+    build:
+      context: ../..
+      dockerfile: services/trading-engine/Dockerfile
+    ports:
+      - "8013:8000"
+    environment:
+      SERVICE_NAME: trading-engine
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+volumes:
+  pgdata:

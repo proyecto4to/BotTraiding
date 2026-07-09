@@ -1,0 +1,10 @@
+# Fase 1: base manifest only, no production tuning (docs/ARCHITECTURE.md section 11).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradingplatform-env
+  namespace: tradingplatform
+data:
+  DATABASE_URL: "postgresql://trading:trading@postgres:5432/tradingplatform"
+  REDIS_URL: "redis://redis:6379/0"
+  NATS_URL: "nats://nats:4222"

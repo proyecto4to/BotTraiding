@@ -1,0 +1,23 @@
+# Fase 1: base kustomization only, no overlays/production tuning yet.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tradingplatform
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - gateway.yaml
+  - auth-service.yaml
+  - strategy-engine.yaml
+  - risk-engine.yaml
+  - portfolio-engine.yaml
+  - ai-engine.yaml
+  - execution-engine.yaml
+  - broker-connectors.yaml
+  - backtester.yaml
+  - optimizer.yaml
+  - paper-trading.yaml
+  - notification-service.yaml
+  - scheduler.yaml
+  - trading-engine.yaml

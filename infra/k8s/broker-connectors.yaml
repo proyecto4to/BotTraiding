@@ -1,0 +1,53 @@
+# Fase 1: base manifest only, no autoscaling/production tuning
+# (docs/ARCHITECTURE.md section 11).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broker-connectors
+  namespace: tradingplatform
+  labels:
+    app: broker-connectors
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: broker-connectors
+  template:
+    metadata:
+      labels:
+        app: broker-connectors
+    spec:
+      containers:
+        - name: broker-connectors
+          image: tradingplatform/broker-connectors:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: tradingplatform-env
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: broker-connectors
+  namespace: tradingplatform
+  labels:
+    app: broker-connectors
+spec:
+  selector:
+    app: broker-connectors
+  ports:
+    - port: 8000
+      targetPort: 8000
