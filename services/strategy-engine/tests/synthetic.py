@@ -49,15 +49,21 @@ def make_bars(
 
 
 def trend_up_bars() -> list[Bar]:
-    """70 bars grinding down, then 60 bars rallying hard."""
-    down = [100.0 - 0.25 * i for i in range(70)]
+    """70 bars grinding down (accelerating), then 60 bars rallying hard.
+
+    The slight curvature in the first leg keeps trailing indicators (e.g.
+    the MACD signal line) genuinely separated from their base series; a
+    perfectly linear leg collapses them onto the same value and turns the
+    crossover into float noise.
+    """
+    down = [100.0 - 0.15 * i - 0.002 * i * i for i in range(70)]
     up = [down[-1] + 0.6 * (i + 1) for i in range(60)]
     return make_bars(down + up)
 
 
 def trend_down_bars() -> list[Bar]:
-    """70 bars grinding up, then 60 bars selling off hard."""
-    up = [100.0 + 0.25 * i for i in range(70)]
+    """70 bars grinding up (accelerating), then 60 bars selling off hard."""
+    up = [100.0 + 0.15 * i + 0.002 * i * i for i in range(70)]
     down = [up[-1] - 0.6 * (i + 1) for i in range(60)]
     return make_bars(up + down)
 

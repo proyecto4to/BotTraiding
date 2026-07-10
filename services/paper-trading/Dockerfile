@@ -13,4 +13,7 @@ COPY services/paper-trading services/paper-trading
 
 WORKDIR /app/services/paper-trading
 EXPOSE 8000
+COPY services/paper-trading/docker-entrypoint.sh /app/services/paper-trading/docker-entrypoint.sh
+RUN chmod +x /app/services/paper-trading/docker-entrypoint.sh
+ENTRYPOINT ["/app/services/paper-trading/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

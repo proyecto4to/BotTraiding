@@ -1,35 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import { useAuth } from "@/lib/auth";
+import { LoadingSkeleton } from "@/components/ui";
 
-const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8000";
-
-type HealthResponse = {
-  status: string;
-  service: string;
-};
-
+/** Root: route to the dashboard when authenticated, /login otherwise. */
 export default function Home() {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { state } = useAuth();
+  const router = useRouter();
 
   useEffect(() => {
-    fetch(`${GATEWAY_URL}/health`)
-      .then((res) => res.json())
-      .then((data: HealthResponse) => setHealth(data))
-      .catch((err: Error) => setError(err.message));
-  }, []);
+    if (state.status === "authenticated") router.replace("/dashboard");
+    else if (state.status === "anonymous" || state.status === "mfa_required") {
+      router.replace("/login");
+    }
+  }, [state.status, router]);
 
   return (
-    <main>
-      <h1>TradingPlatform Dashboard</h1>
-      <p>Fase 1 skeleton - the frontend talks only to the gateway service.</p>
-      <section>
-        <h2>Gateway status</h2>
-        {health && <p>{health.service}: {health.status}</p>}
-        {error && <p>Error reaching gateway: {error}</p>}
-        {!health && !error && <p>Loading...</p>}
-      </section>
-    </main>
+    <div className="guard-loading">
+      <LoadingSkeleton rows={3} />
+    </div>
   );
 }

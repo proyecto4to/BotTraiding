@@ -13,4 +13,7 @@ COPY services/execution-engine services/execution-engine
 
 WORKDIR /app/services/execution-engine
 EXPOSE 8000
+COPY services/execution-engine/docker-entrypoint.sh /app/services/execution-engine/docker-entrypoint.sh
+RUN chmod +x /app/services/execution-engine/docker-entrypoint.sh
+ENTRYPOINT ["/app/services/execution-engine/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

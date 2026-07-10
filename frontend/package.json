@@ -1,23 +1,32 @@
 {
   "name": "tradingplatform-frontend",
-  "version": "0.1.0",
+  "version": "0.13.0",
   "private": true,
-  "description": "TradingPlatform dashboard - Fase 1 skeleton. Consumes only the gateway service.",
+  "description": "TradingPlatform dashboard - Fase 13. Consumes only the gateway service.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "next": "14.2.5",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "recharts": "2.15.0"
   },
   "devDependencies": {
     "typescript": "5.5.4",
     "@types/node": "20.14.10",
     "@types/react": "18.3.3",
-    "@types/react-dom": "18.3.0"
+    "@types/react-dom": "18.3.0",
+    "vitest": "2.1.9",
+    "@vitejs/plugin-react": "4.3.4",
+    "jsdom": "25.0.1",
+    "@testing-library/react": "16.1.0",
+    "@testing-library/dom": "10.4.0",
+    "@testing-library/jest-dom": "6.6.3"
   }
 }

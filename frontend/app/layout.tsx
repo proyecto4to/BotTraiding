@@ -1,16 +1,20 @@
-export const metadata = {
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import "./globals.css";
+import { Providers } from "./providers";
+
+export const metadata: Metadata = {
   title: "TradingPlatform Dashboard",
-  description: "Fase 1 skeleton frontend - consumes only the gateway service.",
+  description:
+    "TradingPlatform dashboard — display and configuration only; all data flows through the gateway.",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
