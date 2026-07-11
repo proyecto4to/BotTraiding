@@ -109,6 +109,7 @@ services:
       RATE_LIMIT_CAPACITY: ${RATE_LIMIT_CAPACITY:-60}
       RATE_LIMIT_REFILL_PER_SECOND: ${RATE_LIMIT_REFILL_PER_SECOND:-1.0}
       PROXY_TIMEOUT_SECONDS: ${PROXY_TIMEOUT_SECONDS:-30}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     depends_on:
       postgres:
         condition: service_healthy

@@ -15,6 +15,10 @@ if (-not (Test-Path $logsDir)) {
 $env:PYTHONPATH = Join-Path $repoRoot 'services'
 $env:Path = "C:\Program Files\nodejs;$env:Path"
 $env:AUTH_SERVICE_URL = 'http://127.0.0.1:8001'
+# Auth firma con este valor por defecto; el gateway NECESITA la variable
+# definida para verificar tokens (trading_contracts/auth.py no tiene default).
+if (-not $env:JWT_SECRET) { $env:JWT_SECRET = 'dev-insecure-secret-change-me' }
+$env:CORS_ORIGINS = 'http://localhost:3000,http://127.0.0.1:3000'
 
 function Test-PortOpen([string]$Server, [int]$Port) {
     try {
