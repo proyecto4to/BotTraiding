@@ -15,6 +15,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 
 from trading_contracts.models import AccountState, Bar, ExecutionReport, Order, Position
@@ -26,6 +27,17 @@ from .registry import CONNECTOR_CLASSES, registry
 SERVICE_NAME = "broker-connectors"
 
 app = FastAPI(title="broker-connectors", version="0.1.0")
+
+# Fase 14 (Monitoreo): default HTTP metrics (request count/latency/errors,
+# in-progress gauge) exposed on /metrics for Prometheus. Guarded so repeated
+# imports (tests) never register duplicate collectors.
+if not getattr(app.state, "metrics_instrumented", False):
+    Instrumentator(
+        should_instrument_requests_inprogress=True,
+        inprogress_labels=False,
+        excluded_handlers=["/metrics"],
+    ).instrument(app).expose(app, include_in_schema=False)
+    app.state.metrics_instrumented = True
 
 # Fase 3: in-memory credential store. Swap for a Vault/KMS-backed
 # CredentialStore implementation later without touching the endpoints below.
@@ -62,6 +74,17 @@ class PlaceOrderRequest(BaseModel):
     price: Optional[float] = None
     account_id: str = "default"
     execution_mode: str = "paper"
+
+
+class CancelOrderRequest(BaseModel):
+    account_id: str = "default"
+
+
+class CancelOrderResponse(BaseModel):
+    broker: str
+    account_id: str
+    order_id: str
+    cancelled: bool
 
 
 def _require_known_broker(broker: str) -> None:
@@ -178,3 +201,26 @@ async def place_order(broker: str, body: PlaceOrderRequest) -> ExecutionReport:
         created_at=datetime.utcnow(),
     )
     return await connector.place_order(order)
+
+
+@app.post("/connectors/{broker}/orders/{order_id}/cancel", response_model=CancelOrderResponse)
+async def cancel_order(
+    broker: str, order_id: str, body: Optional[CancelOrderRequest] = None
+) -> CancelOrderResponse:
+    """Cancel an order previously placed through this connector.
+
+    execution-engine's LiveTransport POSTs this exact path with
+    {"account_id": ...}; the body is optional so manual calls work too.
+    """
+    _require_known_broker(broker)
+    account_id = body.account_id if body is not None else "default"
+    connector = _require_connected(broker, account_id)
+    try:
+        await connector.cancel_order(order_id)
+    except Exception as exc:  # noqa: BLE001 - surfaced as a generic upstream failure
+        raise HTTPException(
+            status_code=502, detail=f"could not cancel order '{order_id}' at {broker}"
+        ) from exc
+    return CancelOrderResponse(
+        broker=broker, account_id=account_id, order_id=order_id, cancelled=True
+    )

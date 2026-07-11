@@ -51,3 +51,8 @@ Thumbs.db
 *.pem
 *.key
 .env
+
+# Local run artifacts
+.local/
+logs/
+tmp_*.py

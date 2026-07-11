@@ -1,4 +1,7 @@
-# Fase 1: base manifest only, no production tuning (docs/ARCHITECTURE.md section 11).
+# Base non-secret env shared by every service. Inter-service URLs are not
+# needed here: the in-code defaults (http://<service>:8000) match the k8s
+# Service names. JWT_SECRET must come from a Secret in a production overlay
+# (never a ConfigMap) - see docs/SCALABILITY.md section 4.
 apiVersion: v1
 kind: ConfigMap
 metadata:

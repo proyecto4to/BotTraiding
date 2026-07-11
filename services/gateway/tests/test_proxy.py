@@ -105,11 +105,83 @@ def test_all_upstream_segments_are_routable(client) -> None:
     """Every mapped segment forwards to its docker-compose default host."""
     from app.proxy import UPSTREAMS
 
-    for segment, (_env, default) in UPSTREAMS.items():
-        respx.get(f"{default}/{segment}/ping").mock(
+    for segment, (_env, default, prefix) in UPSTREAMS.items():
+        upstream_path = f"{prefix}/ping" if prefix else "ping"
+        respx.get(f"{default}/{upstream_path}").mock(
             return_value=httpx.Response(200, json={"pong": segment})
         )
     for segment in UPSTREAMS:
         response = client.get(f"/api/{segment}/ping", headers=auth_headers())
         assert response.status_code == 200, segment
         assert response.json() == {"pong": segment}
+
+
+@respx.mock
+def test_bare_segment_forwards_without_redirect(client) -> None:
+    """GET /api/strategies (frontend list call, no trailing slash) must reach
+    the upstream /strategies route directly - no 307 (fetch breaks on it)."""
+    route = respx.get("http://strategy-engine:8000/strategies").mock(
+        return_value=httpx.Response(200, json=[{"key": "sma"}])
+    )
+    response = client.get(
+        "/api/strategies", headers=auth_headers(), follow_redirects=False
+    )
+    assert response.status_code == 200
+    assert response.json() == [{"key": "sma"}]
+    assert route.called
+
+
+@respx.mock
+def test_trailing_slash_is_normalised(client) -> None:
+    """GET /api/executions/ (frontend executions list) forwards to
+    /executions without the trailing slash (upstream would 307 otherwise)."""
+    route = respx.get("http://execution-engine:8000/executions").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    response = client.get(
+        "/api/executions/",
+        params={"account_id": "default"},
+        headers=auth_headers(),
+        follow_redirects=False,
+    )
+    assert response.status_code == 200
+    assert route.called
+    assert route.calls.last.request.url.params["account_id"] == "default"
+
+
+@respx.mock
+def test_brokers_segment_maps_to_connectors_routes(client) -> None:
+    """/api/brokers/connectors/* must reach broker-connectors' /connectors/*
+    (the service has no /brokers prefix)."""
+    list_route = respx.get("http://broker-connectors:8000/connectors").mock(
+        return_value=httpx.Response(200, json={"brokers": ["binance"]})
+    )
+    status_route = respx.get(
+        "http://broker-connectors:8000/connectors/binance/status"
+    ).mock(return_value=httpx.Response(200, json={"connected": False}))
+
+    response = client.get(
+        "/api/brokers/connectors", headers=auth_headers(), follow_redirects=False
+    )
+    assert response.status_code == 200
+    assert response.json() == {"brokers": ["binance"]}
+    assert list_route.called
+
+    response = client.get(
+        "/api/brokers/connectors/binance/status", headers=auth_headers()
+    )
+    assert response.status_code == 200
+    assert status_route.called
+
+
+@respx.mock
+def test_executions_modes_alias(client) -> None:
+    """execution-engine exposes /modes at its root; the frontend calls
+    /api/executions/modes."""
+    route = respx.get("http://execution-engine:8000/modes").mock(
+        return_value=httpx.Response(200, json={"default_mode": "paper"})
+    )
+    response = client.get("/api/executions/modes", headers=auth_headers())
+    assert response.status_code == 200
+    assert response.json()["default_mode"] == "paper"
+    assert route.called

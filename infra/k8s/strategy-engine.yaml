@@ -1,5 +1,6 @@
-# Fase 1: base manifest only, no autoscaling/production tuning
-# (docs/ARCHITECTURE.md section 11).
+# Fase 15: modest resource requests/limits on every Deployment; CPU-based
+# autoscaling for the stateless services lives in hpa.yaml (see
+# docs/SCALABILITY.md for what state lives where).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,6 +23,13 @@ spec:
           image: tradingplatform/strategy-engine:latest
           ports:
             - containerPort: 8000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
           envFrom:
             - configMapRef:
                 name: tradingplatform-env

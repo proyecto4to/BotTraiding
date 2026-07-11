@@ -13,6 +13,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app import market_config, proxy
 from app.audit import AuditMiddleware
@@ -30,6 +31,17 @@ app = FastAPI(title="gateway", version="0.4.0", lifespan=lifespan)
 app.add_middleware(AuditMiddleware)
 app.include_router(market_config.router)
 app.include_router(proxy.router)
+
+# Fase 14 (Monitoreo): default HTTP metrics (request count/latency/errors,
+# in-progress gauge) exposed on /metrics for Prometheus. Guarded so repeated
+# imports (tests) never register duplicate collectors.
+if not getattr(app.state, "metrics_instrumented", False):
+    Instrumentator(
+        should_instrument_requests_inprogress=True,
+        inprogress_labels=False,
+        excluded_handlers=["/metrics"],
+    ).instrument(app).expose(app, include_in_schema=False)
+    app.state.metrics_instrumented = True
 
 
 @app.get("/health")

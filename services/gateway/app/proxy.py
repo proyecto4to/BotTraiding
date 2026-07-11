@@ -2,7 +2,16 @@
 (ARCHITECTURE.md section 3 - clients never call an internal service directly).
 
 Routing convention: /api/<segment>/<rest> forwards to the mapped upstream as
-/<segment>/<rest> (e.g. /api/auth/login -> {AUTH_SERVICE_URL}/auth/login).
+/<prefix>/<rest> where <prefix> defaults to the segment itself
+(e.g. /api/auth/login -> {AUTH_SERVICE_URL}/auth/login). Two deviations:
+- broker-connectors serves /connectors/*, so /api/brokers/<rest> maps to
+  /<rest> (the frontend calls /api/brokers/connectors/...).
+- execution-engine serves /modes at its root, so /api/executions/modes is
+  aliased to /modes.
+Trailing slashes are normalised away before forwarding so upstream FastAPI
+apps never answer with a 307 redirect (a redirect would leak the internal
+hostname to the browser and break fetch()).
+
 Auth endpoints (/api/auth/*) pass through unauthenticated so login/register/
 refresh work; every other upstream requires a valid access token, verified
 here with the shared DB-free helper. Verified identity is forwarded to
@@ -19,16 +28,22 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from app.deps import payload_from_request
 from app.rate_limit import get_rate_limiter
 
-# segment -> (env var with upstream base URL, docker-compose-network default)
-UPSTREAMS: dict[str, tuple[str, str]] = {
-    "auth": ("AUTH_SERVICE_URL", "http://auth-service:8000"),
-    "strategies": ("STRATEGY_ENGINE_URL", "http://strategy-engine:8000"),
-    "risk": ("RISK_ENGINE_URL", "http://risk-engine:8000"),
-    "portfolio": ("PORTFOLIO_ENGINE_URL", "http://portfolio-engine:8000"),
-    "brokers": ("BROKER_CONNECTORS_URL", "http://broker-connectors:8000"),
-    "backtests": ("BACKTESTER_URL", "http://backtester:8000"),
-    "ai": ("AI_ENGINE_URL", "http://ai-engine:8000"),
-    "executions": ("EXECUTION_ENGINE_URL", "http://execution-engine:8000"),
+# segment -> (env var with upstream base URL, docker-compose-network default,
+#             upstream path prefix that replaces "/api/<segment>")
+UPSTREAMS: dict[str, tuple[str, str, str]] = {
+    "auth": ("AUTH_SERVICE_URL", "http://auth-service:8000", "auth"),
+    "strategies": ("STRATEGY_ENGINE_URL", "http://strategy-engine:8000", "strategies"),
+    "risk": ("RISK_ENGINE_URL", "http://risk-engine:8000", "risk"),
+    "portfolio": ("PORTFOLIO_ENGINE_URL", "http://portfolio-engine:8000", "portfolio"),
+    "brokers": ("BROKER_CONNECTORS_URL", "http://broker-connectors:8000", ""),
+    "backtests": ("BACKTESTER_URL", "http://backtester:8000", "backtests"),
+    "ai": ("AI_ENGINE_URL", "http://ai-engine:8000", "ai"),
+    "executions": ("EXECUTION_ENGINE_URL", "http://execution-engine:8000", "executions"),
+}
+
+# Exact-path aliases: (segment, rest-without-trailing-slash) -> upstream path.
+PATH_ALIASES: dict[tuple[str, str], str] = {
+    ("executions", "modes"): "modes",
 }
 
 # Segments reachable without a JWT (login/register/refresh/oauth live here).
@@ -72,8 +87,35 @@ async def close_http_client() -> None:
 
 
 def upstream_base_url(segment: str) -> str:
-    env_var, default = UPSTREAMS[segment]
+    env_var, default, _prefix = UPSTREAMS[segment]
     return os.environ.get(env_var, default).rstrip("/")
+
+
+def upstream_url(segment: str, path: str) -> str:
+    """Full upstream URL for a client path /api/<segment>/<path>.
+
+    Trailing slashes are stripped so bare list routes (/api/strategies,
+    /api/executions/) hit the exact upstream route instead of triggering a
+    307 redirect from the upstream's redirect_slashes handling.
+    """
+    rest = path.strip("/")
+    _env, _default, prefix = UPSTREAMS[segment]
+    upstream_path = PATH_ALIASES.get(
+        (segment, rest), "/".join(part for part in (prefix, rest) if part)
+    )
+    base = upstream_base_url(segment)
+    return f"{base}/{upstream_path}" if upstream_path else base
+
+
+@router.api_route(
+    "/api/{segment}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+    include_in_schema=False,
+)
+async def proxy_root(segment: str, request: Request) -> Response:
+    """Bare segment (e.g. GET /api/strategies): forward to the upstream list
+    route without the 307 redirect FastAPI's redirect_slashes would emit."""
+    return await proxy(segment, "", request)
 
 
 @router.api_route(
@@ -108,7 +150,7 @@ async def proxy(segment: str, path: str, request: Request) -> Response:
         headers["x-user-id"] = payload.sub
         headers["x-user-roles"] = ",".join(payload.roles)
 
-    url = f"{upstream_base_url(segment)}/{segment}/{path}"
+    url = upstream_url(segment, path)
     body = await request.body()
     client = await get_http_client()
     try:

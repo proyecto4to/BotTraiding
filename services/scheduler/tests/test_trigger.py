@@ -112,12 +112,20 @@ def test_failing_job_returns_502_and_records_error(client, admin_headers) -> Non
     assert jobs["reoptimize-weekly"]["last_run"]["status"] == "error"
 
 
-def test_scheduler_never_asks_for_promotion(client, admin_headers) -> None:
+def test_scheduler_never_asks_for_promotion() -> None:
     """Cron re-optimization must never carry promote=true (Fase 12: only
     explicit, validated promotions may apply params)."""
-    import inspect
+    from datetime import datetime, timedelta
 
-    from app.clients import HttpOptimizerClient
+    from app.clients import build_optimize_payload
 
-    source = inspect.getsource(HttpOptimizerClient.trigger_optimization)
-    assert '"promote": False' in source
+    payload = build_optimize_payload(
+        "sma_crossover",
+        {"budget": 8, "lookback_days": 90, "promote": True},  # ignored on purpose
+    )
+    assert payload["promote"] is False
+    assert payload["strategy_key"] == "sma_crossover"
+    assert payload["budget"] == 8
+    start = datetime.fromisoformat(payload["start"])
+    end = datetime.fromisoformat(payload["end"])
+    assert end - start == timedelta(days=90)

@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import Depends, FastAPI, HTTPException
+from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy.orm import Session
 
 from trading_contracts import ExecutionReport, OrderStatus, Position
@@ -33,6 +34,17 @@ from .schemas import (
 SERVICE_NAME = "paper-trading"
 
 app = FastAPI(title="paper-trading", version="0.2.0")
+
+# Fase 14 (Monitoreo): default HTTP metrics (request count/latency/errors,
+# in-progress gauge) exposed on /metrics for Prometheus. Guarded so repeated
+# imports (tests) never register duplicate collectors.
+if not getattr(app.state, "metrics_instrumented", False):
+    Instrumentator(
+        should_instrument_requests_inprogress=True,
+        inprogress_labels=False,
+        excluded_handlers=["/metrics"],
+    ).instrument(app).expose(app, include_in_schema=False)
+    app.state.metrics_instrumented = True
 
 CANCELLABLE_STATUSES = {
     OrderStatus.PENDING.value,

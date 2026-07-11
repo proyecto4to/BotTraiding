@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from uuid import uuid4
 
+import httpx
 from fastapi.testclient import TestClient
 
 from app.connectors.http_base import BrokerConfig
@@ -101,3 +102,62 @@ def test_place_order_via_api():
     )
     assert order_resp.status_code == 200
     assert order_resp.json()["filled_quantity"] == 1.0
+
+
+def test_cancel_order_via_api():
+    """execution-engine's LiveTransport POSTs exactly this path + body."""
+    _seed_connected_connector("binance")
+    client.post(
+        "/connectors/binance/connect",
+        json={"api_key": "k", "api_secret": "s", "demo": True},
+    )
+
+    resp = client.post(
+        "/connectors/binance/orders/ord-123/cancel", json={"account_id": "default"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {
+        "broker": "binance",
+        "account_id": "default",
+        "order_id": "ord-123",
+        "cancelled": True,
+    }
+
+
+def test_cancel_order_without_body_defaults_account():
+    _seed_connected_connector("binance")
+    client.post(
+        "/connectors/binance/connect",
+        json={"api_key": "k", "api_secret": "s", "demo": True},
+    )
+    resp = client.post("/connectors/binance/orders/ord-9/cancel")
+    assert resp.status_code == 200
+    assert resp.json()["account_id"] == "default"
+
+
+def test_cancel_order_unknown_broker_returns_404():
+    resp = client.post("/connectors/notabroker/orders/ord-1/cancel", json={})
+    assert resp.status_code == 404
+
+
+def test_cancel_order_not_connected_returns_409():
+    resp = client.post("/connectors/binance/orders/ord-1/cancel", json={})
+    assert resp.status_code == 409
+
+
+def test_cancel_order_upstream_failure_returns_502():
+    def failing_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/ping":
+            return httpx.Response(200, json={"status": "ok"})
+        return httpx.Response(500, json={"error": "boom"})
+
+    config = BrokerConfig(broker="binance", demo=True, account_id="default")
+    registry.get_or_create("binance", config, client=make_mock_client(failing_handler))
+    client.post(
+        "/connectors/binance/connect",
+        json={"api_key": "k", "api_secret": "s", "demo": True},
+    )
+
+    resp = client.post("/connectors/binance/orders/ord-1/cancel", json={})
+    assert resp.status_code == 502

@@ -1,4 +1,6 @@
-# Fase 1: base kustomization only, no overlays/production tuning yet.
+# Fase 15: base manifests + resource requests/limits + HPAs for the
+# stateless services (hpa.yaml). Production overlays (real secrets, ingress,
+# storage) are still future work.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -21,3 +23,4 @@ resources:
   - notification-service.yaml
   - scheduler.yaml
   - trading-engine.yaml
+  - hpa.yaml

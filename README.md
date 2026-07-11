@@ -4,56 +4,66 @@ Plataforma de trading algoritmico modular, multi-broker, multi-mercado,
 multi-estrategia, multi-IA y multi-usuario. La arquitectura completa,
 principios de diseno y contratos entre servicios viven en
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — leerlo antes de tocar
-cualquier servicio.
+cualquier servicio. Cómo escala (y qué falta para escalar más) está en
+[`docs/SCALABILITY.md`](docs/SCALABILITY.md).
 
-This repository is currently in **Fase 1**: infrastructure scaffolding only.
-No trading business logic exists yet (see `docs/ARCHITECTURE.md` section 11).
+**Estado: Fases 0–15 implementadas** (ver tabla más abajo). Todo el flujo
+señal → riesgo → portafolio → ejecución funciona en modo paper; el modo live
+existe detrás de un gate de administrador y queda apagado por defecto.
 
 ## Repo layout
 
 ```
-services/            Python (FastAPI) microservices, one per responsibility
-  shared/contracts/   Shared pydantic models + BrokerConnector/Strategy interfaces
-  gateway/             AuthN/AuthZ, routing, frontend aggregation
-  auth-service/        Users, JWT, MFA, roles, audit
-  strategy-engine/     Strategy plugins -> TradeSignal
-  risk-engine/         Validates TradeSignal against RiskLimits
-  portfolio-engine/    Account state: exposure, margin, PnL, drawdown
-  ai-engine/           Market regime, strategy ranking/selection
-  execution-engine/    TradeSignal -> Order -> broker submission
-  broker-connectors/   BrokerConnector adapters per broker/exchange
-  backtester/          Historical simulation
-  optimizer/           Parameter search + out-of-sample validation
-  paper-trading/       Simulated broker adapter, same execution-engine
-  notification-service/  Alerts (email/push/webhook)
-  scheduler/           Periodic jobs (retraining, reoptimization)
-  trading-engine/      Orchestrates signal -> risk -> portfolio -> execution
-frontend/            Next.js + TypeScript dashboard (talks only to gateway)
-mobile/              Flutter app skeleton (talks only to gateway)
+services/              Python (FastAPI) microservices, one per responsibility
+  shared/contracts/     trading_contracts: pydantic models + BrokerConnector/
+                        Strategy interfaces + DB-free JWT helpers
+  shared/strategies/    trading_strategies: built-in strategy plugins
+  gateway/              AuthN/AuthZ, rate limiting, /api/* reverse proxy,
+                        market/symbol config, audit log
+  auth-service/         Users, JWT, Google OAuth, MFA (TOTP), roles, audit
+  strategy-engine/      Strategy plugins -> TradeSignal (registry + DB sync)
+  risk-engine/          TradeSignal validation, sizing, circuit breakers,
+                        risk_events feed
+  portfolio-engine/     Account state: exposure, margin, PnL, drawdown
+  ai-engine/            Market regime, strategy ranking, underperformance
+  execution-engine/     Order slicing, retries, paper/live transports
+  broker-connectors/    8 HTTP broker adapters + MetaTrader5 (place/cancel/
+                        positions/account/historical), in-memory credentials
+  backtester/           Historical simulation (spread/slippage/commission/latency)
+  optimizer/            Parameter search + out-of-sample promotion gate
+  paper-trading/        Simulated broker with configurable fill model
+  notification-service/ Alerts skeleton (NATS consumer future work)
+  scheduler/            APScheduler cron: reoptimize, regime refresh, health pings
+  trading-engine/       Orchestrator skeleton (flow lives in the services)
+frontend/              Next.js 14 dashboard (talks ONLY to the gateway)
+mobile/                Flutter app skeleton (talks only to the gateway)
 infra/
-  docker/              docker-compose stack + Postgres init.sql
-  k8s/                 Base Kustomize manifests (no production tuning yet)
-  ci/                  CI-related support files
-.github/workflows/    GitHub Actions CI (pytest, lint, docker build per service)
-docs/ARCHITECTURE.md  Source of truth for architecture and contracts
+  docker/               docker-compose stack, init.sql, prometheus.yml,
+                        grafana provisioning + dashboard, promtail -> Loki
+                        (see infra/docker/README-observability.md)
+  k8s/                  Kustomize manifests: resources/limits on every
+                        Deployment + HPAs for stateless services (hpa.yaml)
+.github/workflows/     CI: pytest + ruff + docker build per service
+docs/                  ARCHITECTURE.md (source of truth), SCALABILITY.md
 ```
 
-Every Python service is an independent FastAPI app exposing only `/health`
-and `/ready` in Fase 1, depending on the shared `trading_contracts` package
-for typed contracts (`TradeSignal`, `RiskDecision`, `Order`, `RiskLimits`,
-the `BrokerConnector` interface and the `Strategy` interface). No service
-imports another service's code directly — only through these shared,
-explicitly defined contracts.
-
-## Running locally
+## Quickstart (docker compose)
 
 ```bash
-cd infra/docker
-docker compose up --build
+cp infra/docker/.env.example infra/docker/.env   # set JWT_SECRET etc.
+docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env up --build
 ```
 
-This brings up Postgres (seeded via `init.sql`), Redis, NATS, Loki,
-Prometheus, Grafana, and all 14 Python service containers.
+Then:
+
+- Frontend: <http://localhost:3000> (register a user, then log in)
+- Gateway API: <http://localhost:8000> (everything under `/api/*`)
+- Grafana: <http://localhost:3001> (admin/admin — "TradingPlatform Overview"
+  dashboard is pre-provisioned; Prometheus + Loki datasources included)
+- Prometheus: <http://localhost:9090>
+
+Services with persistence run their Alembic migrations automatically at
+container start. Every service exposes `/health`, `/ready` and `/metrics`.
 
 To work on a single service without Docker:
 
@@ -65,29 +75,41 @@ pytest -q
 uvicorn app.main:app --reload
 ```
 
-The frontend (`frontend/`) and mobile app (`mobile/`) are skeletons — install
-dependencies (`npm install`, `flutter pub get`) before running them; this
-repository does not vendor `node_modules` or Flutter build artifacts.
+Frontend: `cd frontend && npm install && npm run dev` (set
+`NEXT_PUBLIC_GATEWAY_URL` if the gateway is not on `http://localhost:8000`).
 
-## Roadmap (Fase 0-15)
+## Estado por fase
 
-Detailed scope for each phase lives in `docs/ARCHITECTURE.md`; Fase 0 (this
-document's prerequisites) and the non-negotiable principles are covered
-there in full. Summary:
+| Fase | Alcance | Estado | Tests |
+|---|---|---|---|
+| 0 | Arquitectura, contratos, principios (`docs/ARCHITECTURE.md`) | ✅ | — |
+| 1 | Scaffolding: 14 servicios, contratos, CI, compose, k8s base | ✅ | health tests (notification 2, trading-engine 2) |
+| 2 | auth-service: registro, login, JWT+refresh, Google OAuth, MFA, roles, auditoría | ✅ | 24 |
+| 3 | broker-connectors: 8 adapters HTTP + MT5, registry, rate limit, reconexión, cancel | ✅ | 72 |
+| 4 | gateway: mercados/símbolos, reverse proxy `/api/*`, rate limiting, auditoría | ✅ | 59 |
+| 5–6 | strategy-engine: plugins, sync a DB, configs por estrategia, evaluación | ✅ | 135 |
+| 7 | risk-engine + portfolio-engine: límites, sizing, circuit breakers, exposición/PnL | ✅ | 82 + 22 |
+| 8 | backtester: simulación con spread/slippage/comisión/latencia | ✅ | 63 |
+| 9–10 | execution-engine + paper-trading: slicing, retries, transports paper/live | ✅ | 40 + 23 |
+| 11 | ai-engine: régimen de mercado, ranking, underperformance | ✅ | 42 |
+| 12 | optimizer + scheduler: búsqueda de parámetros, gate out-of-sample, cron | ✅ | 26 + 21 |
+| 13 | frontend: dashboard Next.js completo contra el gateway | ✅ | 16 |
+| 14 | Monitoreo: `/metrics` en los 14 servicios, Prometheus, Grafana provisionado, promtail→Loki | ✅ | — |
+| 15 | Escalabilidad: resources/limits, HPAs, `docs/SCALABILITY.md` | ✅ | — |
 
-- **Fase 0** — Architecture, contracts, and principles defined (see `docs/ARCHITECTURE.md`).
-- **Fase 1** — Infrastructure scaffolding: service skeletons, contracts, CI, docker-compose, base k8s (this repo, current state).
-- **Fase 2** — Auth, RBAC, and audit logging implemented end-to-end.
-- **Fase 3** — Market data ingestion and broker-connectors stub (simulated) wired to real interfaces.
-- **Fase 4** — Strategy plugin loading + first non-trading example strategy.
-- **Fase 5** — Risk engine limit enforcement against `RiskLimits`.
-- **Fase 6** — Portfolio engine: exposure, margin, correlation, PnL tracking.
-- **Fase 7** — Execution engine + paper-trading broker adapter.
-- **Fase 8** — Backtester with spread/slippage/commission/latency modeling.
-- **Fase 9** — Optimizer with out-of-sample validation gating.
-- **Fase 10** — AI engine: market regime detection and strategy ranking.
-- **Fase 11** — Notification service and scheduler jobs.
-- **Fase 12** — Trading engine orchestration across the full signal-to-execution flow.
-- **Fase 13** — Frontend dashboard feature-complete against the gateway API.
-- **Fase 14** — Mobile app feature-complete against the gateway API.
-- **Fase 15** — Real broker connectors, production k8s tuning, go-live readiness.
+Suma: **613 tests backend** (todos en verde) + **16 frontend**.
+
+## Qué falta para producción
+
+- **Credenciales reales de broker**: los conectores apuntan a URLs demo y el
+  credential store es in-memory — falta Vault/KMS y persistencia cifrada.
+- **Streaming**: market data por websocket (hoy `stream_market_data` es
+  polling) y push de fills al frontend (hoy la UI hace polling).
+- **Rate limiting en Redis**: el token bucket del gateway es por proceso;
+  con más de una réplica el límite efectivo se multiplica (ver SCALABILITY.md).
+- **Tokens httpOnly**: el frontend guarda JWTs en localStorage; migrar a
+  cookies httpOnly + CSRF.
+- **OAuth real**: rellenar `GOOGLE_CLIENT_ID/SECRET` con credenciales reales.
+- **k8s productivo**: overlays con secrets reales, ingress/TLS, PodDisruption
+  Budgets, y los puntos de estado de SCALABILITY.md (scheduler leader
+  election, sesiones de broker compartidas).

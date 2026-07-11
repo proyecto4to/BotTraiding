@@ -1,10 +1,71 @@
+# Prometheus scrape configuration for the docker-compose stack (Fase 14).
+# Every Python service exposes /metrics via prometheus-fastapi-instrumentator
+# (default HTTP metrics: http_requests_total, http_request_duration_seconds,
+# http_requests_inprogress, request/response sizes).
+# Targets use docker network hostnames; all services listen on 8000 inside
+# the network regardless of the host port mapping.
+
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
 
 scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
 
-  # Fase 1: services expose /health and /ready only, no /metrics yet.
-  # This scrape config is a placeholder for when metrics are added.
+  - job_name: gateway
+    static_configs:
+      - targets: ["gateway:8000"]
+
+  - job_name: auth-service
+    static_configs:
+      - targets: ["auth-service:8000"]
+
+  - job_name: strategy-engine
+    static_configs:
+      - targets: ["strategy-engine:8000"]
+
+  - job_name: risk-engine
+    static_configs:
+      - targets: ["risk-engine:8000"]
+
+  - job_name: portfolio-engine
+    static_configs:
+      - targets: ["portfolio-engine:8000"]
+
+  - job_name: ai-engine
+    static_configs:
+      - targets: ["ai-engine:8000"]
+
+  - job_name: execution-engine
+    static_configs:
+      - targets: ["execution-engine:8000"]
+
+  - job_name: broker-connectors
+    static_configs:
+      - targets: ["broker-connectors:8000"]
+
+  - job_name: backtester
+    static_configs:
+      - targets: ["backtester:8000"]
+
+  - job_name: optimizer
+    static_configs:
+      - targets: ["optimizer:8000"]
+
+  - job_name: paper-trading
+    static_configs:
+      - targets: ["paper-trading:8000"]
+
+  - job_name: notification-service
+    static_configs:
+      - targets: ["notification-service:8000"]
+
+  - job_name: scheduler
+    static_configs:
+      - targets: ["scheduler:8000"]
+
+  - job_name: trading-engine
+    static_configs:
+      - targets: ["trading-engine:8000"]

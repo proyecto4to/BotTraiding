@@ -120,3 +120,15 @@ class CircuitBreakerStatus(BaseModel):
     reason: Optional[str] = None
     error_count: int = 0
     updated_at: Optional[datetime] = None
+
+
+class RiskEventOut(BaseModel):
+    """One persisted risk_events row (see app/models.py RiskEvent). The
+    frontend alerts page polls GET /risk/events/{account_id} for these."""
+
+    id: str
+    account_id: str
+    event_type: str
+    signal_id: Optional[str] = None
+    payload: dict
+    created_at: Optional[datetime] = None

@@ -16,6 +16,7 @@ docker-entrypoint.sh before uvicorn starts.
 from __future__ import annotations
 
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from trading_strategies import load_builtin_strategies
 
@@ -28,6 +29,17 @@ _registry = load_builtin_strategies()
 
 app = FastAPI(title=SERVICE_NAME, version="0.2.0")
 app.include_router(router)
+
+# Fase 14 (Monitoreo): default HTTP metrics (request count/latency/errors,
+# in-progress gauge) exposed on /metrics for Prometheus. Guarded so repeated
+# imports (tests) never register duplicate collectors.
+if not getattr(app.state, "metrics_instrumented", False):
+    Instrumentator(
+        should_instrument_requests_inprogress=True,
+        inprogress_labels=False,
+        excluded_handlers=["/metrics"],
+    ).instrument(app).expose(app, include_in_schema=False)
+    app.state.metrics_instrumented = True
 
 
 @app.get("/health")

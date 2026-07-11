@@ -16,6 +16,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from . import db as db_module
 from .api import router
@@ -43,6 +44,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=SERVICE_NAME, version="0.2.0", lifespan=lifespan)
 app.include_router(router)
+
+# Fase 14 (Monitoreo): default HTTP metrics (request count/latency/errors,
+# in-progress gauge) exposed on /metrics for Prometheus. Guarded so repeated
+# imports (tests) never register duplicate collectors.
+if not getattr(app.state, "metrics_instrumented", False):
+    Instrumentator(
+        should_instrument_requests_inprogress=True,
+        inprogress_labels=False,
+        excluded_handlers=["/metrics"],
+    ).instrument(app).expose(app, include_in_schema=False)
+    app.state.metrics_instrumented = True
 
 
 @app.get("/health")

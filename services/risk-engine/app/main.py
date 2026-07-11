@@ -8,18 +8,22 @@ es sincrona porque execution-engine necesita la decision inmediata.
 
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Query
+from prometheus_fastapi_instrumentator import Instrumentator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import circuit_breaker as cb
 from app import events, limits as limits_repo, pipeline
 from app.db import get_db
 from app.deps import require_admin
+from app.models import RiskEvent
 from app.portfolio_client import PortfolioClient, get_portfolio_client
 from app.schemas import (
     CircuitBreakerStatus,
     ExtendedRiskLimits,
     RiskDecisionResponse,
+    RiskEventOut,
     RiskLimitsResponse,
     ValidateRequest,
 )
@@ -28,6 +32,17 @@ from trading_contracts.auth import TokenPayload
 SERVICE_NAME = "risk-engine"
 
 app = FastAPI(title="risk-engine", version="0.2.0")
+
+# Fase 14 (Monitoreo): default HTTP metrics (request count/latency/errors,
+# in-progress gauge) exposed on /metrics for Prometheus. Guarded so repeated
+# imports (tests) never register duplicate collectors.
+if not getattr(app.state, "metrics_instrumented", False):
+    Instrumentator(
+        should_instrument_requests_inprogress=True,
+        inprogress_labels=False,
+        excluded_handlers=["/metrics"],
+    ).instrument(app).expose(app, include_in_schema=False)
+    app.state.metrics_instrumented = True
 
 
 @app.get("/health")
@@ -75,6 +90,36 @@ async def put_limits(
     await events.publish_event("risk.limits_updated", payload)
     db.commit()
     return RiskLimitsResponse(account_id=account_id, limits=saved, is_default=False)
+
+
+@app.get("/risk/events/{account_id}", response_model=list[RiskEventOut])
+def list_risk_events(
+    account_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+) -> list[RiskEventOut]:
+    """Recent persisted risk events for an account, newest first (paginated
+    via limit/offset). The frontend alerts page polls this through the
+    gateway (/api/risk/events/{account})."""
+    rows = db.scalars(
+        select(RiskEvent)
+        .where(RiskEvent.account_id == account_id)
+        .order_by(RiskEvent.created_at.desc(), RiskEvent.id.desc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    return [
+        RiskEventOut(
+            id=row.id,
+            account_id=row.account_id,
+            event_type=row.event_type,
+            signal_id=row.signal_id,
+            payload=row.payload,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
 
 
 @app.get("/risk/circuit-breaker/{account_id}", response_model=CircuitBreakerStatus)

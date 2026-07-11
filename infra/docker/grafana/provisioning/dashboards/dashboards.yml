@@ -1,0 +1,15 @@
+# Grafana dashboard provisioning (Fase 14). Loads every JSON dashboard in
+# /var/lib/grafana/dashboards (mounted from infra/docker/grafana/dashboards).
+apiVersion: 1
+
+providers:
+  - name: tradingplatform
+    orgId: 1
+    folder: TradingPlatform
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

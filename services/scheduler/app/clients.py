@@ -51,28 +51,36 @@ class OptimizerClient(ABC):
         """Start one re-optimization run for a strategy."""
 
 
+def build_optimize_payload(strategy_key: str, params: dict[str, Any]) -> dict[str, Any]:
+    """POST /optimize body for a scheduled re-optimization.
+
+    ``promote`` is HARDCODED to False: a cron job may trigger the search,
+    but applying params stays an explicit, out-of-sample-validated act
+    (docs/ARCHITECTURE.md Fase 12).
+    """
+    lookback_days = int(params.get("lookback_days", 180))
+    end = datetime.now(timezone.utc).replace(microsecond=0)
+    start = end - timedelta(days=lookback_days)
+    return {
+        "strategy_key": strategy_key,
+        "symbol": params.get("symbol", os.environ.get("OPTIMIZE_SYMBOL", "BTC/USDT")),
+        "timeframe": params.get(
+            "timeframe", os.environ.get("OPTIMIZE_TIMEFRAME", "1h")
+        ),
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "search_type": params.get("search_type", "grid"),
+        "budget": int(params.get("budget", 16)),
+        "promote": False,
+    }
+
+
 class HttpOptimizerClient(OptimizerClient):
     async def trigger_optimization(
         self, strategy_key: str, params: dict[str, Any]
     ) -> dict[str, Any]:
         base = _url("OPTIMIZER_URL", "http://optimizer:8000")
-        lookback_days = int(params.get("lookback_days", 180))
-        end = datetime.now(timezone.utc).replace(microsecond=0)
-        start = end - timedelta(days=lookback_days)
-        payload = {
-            "strategy_key": strategy_key,
-            "symbol": params.get("symbol", os.environ.get("OPTIMIZE_SYMBOL", "BTC/USDT")),
-            "timeframe": params.get(
-                "timeframe", os.environ.get("OPTIMIZE_TIMEFRAME", "1h")
-            ),
-            "start": start.isoformat(),
-            "end": end.isoformat(),
-            "search_type": params.get("search_type", "grid"),
-            "budget": int(params.get("budget", 16)),
-            # NEVER promote from a cron job: promotion stays an explicit,
-            # human/API-audited act after out-of-sample validation.
-            "promote": False,
-        }
+        payload = build_optimize_payload(strategy_key, params)
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             resp = await client.post(f"{base}/optimize", json=payload)
             resp.raise_for_status()

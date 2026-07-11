@@ -1,13 +1,18 @@
-# TradingPlatform - Fase 1 local development stack.
-# Brings up infrastructure (postgres, redis, nats, loki, prometheus, grafana)
-# plus every Python service skeleton. No trading logic runs here.
+# TradingPlatform - local development stack (Fases 0-15).
+# Infrastructure (postgres, redis, nats, loki, promtail, prometheus, grafana)
+# plus every Python service and the Next.js frontend.
 #
 # Usage:
 #   1. cp infra/docker/.env.example infra/docker/.env  (fill in real values)
 #   2. docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env up --build
-# auth-service applies its Alembic migration automatically on container start
-# (see services/auth-service/docker-entrypoint.sh) — no manual `alembic upgrade
-# head` step needed against the compose Postgres.
+#
+# Services with persistence apply their Alembic migrations automatically on
+# container start (see services/*/docker-entrypoint.sh) - no manual
+# `alembic upgrade head` step needed against the compose Postgres.
+#
+# Tunables use ${VAR:-default}: override them in infra/docker/.env without
+# editing this file. JWT_SECRET has no default on purpose - it must be shared
+# by auth-service, gateway, risk-engine, execution-engine and scheduler.
 
 services:
   postgres:
@@ -50,19 +55,33 @@ services:
       - "3100:3100"
     command: ["-config.file=/etc/loki/local-config.yaml"]
 
+  promtail:
+    # Ships every container's stdout (services log structured JSON) to Loki.
+    # See infra/docker/README-observability.md.
+    image: grafana/promtail:2.9.6
+    command: ["-config.file=/etc/promtail/config.yml"]
+    volumes:
+      - ./promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
   prometheus:
     image: prom/prometheus:v2.53.0
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
 
   grafana:
     image: grafana/grafana:11.1.0
     ports:
       - "3001:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
       - loki
@@ -78,6 +97,18 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in infra/docker/.env, see .env.example}
+      AUTH_SERVICE_URL: http://auth-service:8000
+      STRATEGY_ENGINE_URL: http://strategy-engine:8000
+      RISK_ENGINE_URL: http://risk-engine:8000
+      PORTFOLIO_ENGINE_URL: http://portfolio-engine:8000
+      BROKER_CONNECTORS_URL: http://broker-connectors:8000
+      BACKTESTER_URL: http://backtester:8000
+      AI_ENGINE_URL: http://ai-engine:8000
+      EXECUTION_ENGINE_URL: http://execution-engine:8000
+      RATE_LIMIT_CAPACITY: ${RATE_LIMIT_CAPACITY:-60}
+      RATE_LIMIT_REFILL_PER_SECOND: ${RATE_LIMIT_REFILL_PER_SECOND:-1.0}
+      PROXY_TIMEOUT_SECONDS: ${PROXY_TIMEOUT_SECONDS:-30}
     depends_on:
       postgres:
         condition: service_healthy
@@ -142,12 +173,18 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in infra/docker/.env, see .env.example}
+      PORTFOLIO_ENGINE_URL: http://portfolio-engine:8000
+      PORTFOLIO_ENGINE_TIMEOUT: ${PORTFOLIO_ENGINE_TIMEOUT:-5}
+      CB_ERROR_WINDOW_SECONDS: ${CB_ERROR_WINDOW_SECONDS:-300}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       nats:
+        condition: service_started
+      portfolio-engine:
         condition: service_started
 
   portfolio-engine:
@@ -161,6 +198,8 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      DEFAULT_STARTING_CASH: ${DEFAULT_STARTING_CASH:-100000}
+      MAX_RETURN_POINTS: ${MAX_RETURN_POINTS:-500}
     depends_on:
       postgres:
         condition: service_healthy
@@ -180,6 +219,10 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      AI_REGIME_SYMBOLS: ${AI_REGIME_SYMBOLS:-}
+      UNDERPERF_MIN_TRADES: ${UNDERPERF_MIN_TRADES:-30}
+      UNDERPERF_SHARPE_THRESHOLD: ${UNDERPERF_SHARPE_THRESHOLD:-0.0}
+      UNDERPERF_MAX_DRAWDOWN: ${UNDERPERF_MAX_DRAWDOWN:-0.20}
     depends_on:
       postgres:
         condition: service_healthy
@@ -199,12 +242,33 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in infra/docker/.env, see .env.example}
+      # Mandatory progression backtest -> paper -> live: live stays off by
+      # default and quantities are only split when a max child size is set.
+      EXECUTION_MODE: ${EXECUTION_MODE:-paper}
+      EXECUTION_LIVE_ENABLED: ${EXECUTION_LIVE_ENABLED:-false}
+      EXECUTION_MAX_CHILD_SIZE: ${EXECUTION_MAX_CHILD_SIZE:-0}
+      EXECUTION_RETRY_MAX_ATTEMPTS: ${EXECUTION_RETRY_MAX_ATTEMPTS:-3}
+      EXECUTION_RETRY_BASE_DELAY: ${EXECUTION_RETRY_BASE_DELAY:-0.2}
+      EXECUTION_RETRY_MAX_DELAY: ${EXECUTION_RETRY_MAX_DELAY:-5.0}
+      EXECUTION_RETRY_JITTER: ${EXECUTION_RETRY_JITTER:-0.25}
+      EXECUTION_TRANSPORT_TIMEOUT: ${EXECUTION_TRANSPORT_TIMEOUT:-10}
+      PAPER_TRADING_URL: http://paper-trading:8000
+      BROKER_CONNECTORS_URL: http://broker-connectors:8000
+      PORTFOLIO_ENGINE_URL: http://portfolio-engine:8000
+      PORTFOLIO_ENGINE_TIMEOUT: ${PORTFOLIO_ENGINE_TIMEOUT:-5}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       nats:
+        condition: service_started
+      paper-trading:
+        condition: service_started
+      broker-connectors:
+        condition: service_started
+      portfolio-engine:
         condition: service_started
 
   broker-connectors:
@@ -237,6 +301,7 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      BACKTESTER_MAX_BARS: ${BACKTESTER_MAX_BARS:-20000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -256,12 +321,22 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      PROMOTION_THRESHOLD: ${PROMOTION_THRESHOLD:-1.05}
+      MAX_DRAWDOWN_TOLERANCE: ${MAX_DRAWDOWN_TOLERANCE:-0.20}
+      OPTIMIZER_SYNC_BUDGET: ${OPTIMIZER_SYNC_BUDGET:-32}
+      BACKTESTER_URL: http://backtester:8000
+      STRATEGY_ENGINE_URL: http://strategy-engine:8000
+      OPTIMIZER_SYSTEM_USER_ID: ${OPTIMIZER_SYSTEM_USER_ID:-00000000-0000-0000-0000-000000000001}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       nats:
+        condition: service_started
+      backtester:
+        condition: service_started
+      strategy-engine:
         condition: service_started
 
   paper-trading:
@@ -275,6 +350,15 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      PAPER_SPREAD_BPS: ${PAPER_SPREAD_BPS:-2.0}
+      PAPER_SLIPPAGE_BPS: ${PAPER_SLIPPAGE_BPS:-1.0}
+      PAPER_SIZE_IMPACT_BPS_PER_UNIT: ${PAPER_SIZE_IMPACT_BPS_PER_UNIT:-0.0}
+      PAPER_COMMISSION_BPS: ${PAPER_COMMISSION_BPS:-1.0}
+      PAPER_COMMISSION_PER_UNIT: ${PAPER_COMMISSION_PER_UNIT:-0.0}
+      PAPER_MAX_FILL_QUANTITY: ${PAPER_MAX_FILL_QUANTITY:-0.0}
+      PAPER_LATENCY_MS: ${PAPER_LATENCY_MS:-0.0}
+      PAPER_DEFAULT_STARTING_CASH: ${PAPER_DEFAULT_STARTING_CASH:-100000}
+      PAPER_ALLOW_SHORT: ${PAPER_ALLOW_SHORT:-true}
     depends_on:
       postgres:
         condition: service_healthy
@@ -313,6 +397,14 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in infra/docker/.env, see .env.example}
+      SCHEDULER_AUTOSTART: ${SCHEDULER_AUTOSTART:-true}
+      STRATEGY_ENGINE_URL: http://strategy-engine:8000
+      OPTIMIZER_URL: http://optimizer:8000
+      AI_ENGINE_URL: http://ai-engine:8000
+      # Defaults to pinging the three services above; override to add more,
+      # e.g. "gateway=http://gateway:8000,risk-engine=http://risk-engine:8000"
+      HEALTH_PING_URLS: ${HEALTH_PING_URLS:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -339,6 +431,22 @@ services:
         condition: service_healthy
       nats:
         condition: service_started
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      args:
+        # Baked into the client bundle at build time (NEXT_PUBLIC_*): the URL
+        # the BROWSER uses to reach the gateway, hence localhost, not the
+        # docker network hostname.
+        NEXT_PUBLIC_GATEWAY_URL: ${NEXT_PUBLIC_GATEWAY_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_GATEWAY_URL: ${NEXT_PUBLIC_GATEWAY_URL:-http://localhost:8000}
+    depends_on:
+      - gateway
 
 volumes:
   pgdata:
