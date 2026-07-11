@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import pyotp
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -40,6 +41,17 @@ DEFAULT_ROLE = "viewer"
 VALID_ROLES = {"admin", "trader", "viewer", "auditor"}
 
 app = FastAPI(title="auth-service", version="0.2.0")
+
+# Fase 14 (Monitoreo): default HTTP metrics (request count/latency/errors,
+# in-progress gauge) exposed on /metrics for Prometheus. Guarded so repeated
+# imports (tests) never register duplicate collectors.
+if not getattr(app.state, "metrics_instrumented", False):
+    Instrumentator(
+        should_instrument_requests_inprogress=True,
+        inprogress_labels=False,
+        excluded_handlers=["/metrics"],
+    ).instrument(app).expose(app, include_in_schema=False)
+    app.state.metrics_instrumented = True
 
 
 @app.get("/health")
@@ -115,12 +127,15 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
     db.commit()
     db.refresh(user)
 
-    audit_record(
-        db,
-        actor=user.id,
-        action="register",
-        metadata={"email": user.email, "ip": _client_ip(request)},
-    )
+    try:
+        audit_record(
+            db,
+            actor=user.id,
+            action="register",
+            metadata={"email": user.email, "ip": _client_ip(request)},
+        )
+    except Exception:
+        db.rollback()
     return _user_out(user)
 
 

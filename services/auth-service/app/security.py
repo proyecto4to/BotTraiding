@@ -23,7 +23,7 @@ MFA_PENDING_TOKEN_EXPIRE_MINUTES = int(
     os.environ.get("MFA_PENDING_TOKEN_EXPIRE_MINUTES", "5")
 )
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
