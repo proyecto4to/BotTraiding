@@ -34,6 +34,7 @@ export default function DashboardPage() {
   const [portfolio, setPortfolio] = useState<PortfolioState | null>(null);
   const [breaker, setBreaker] = useState<CircuitBreakerStatus | null>(null);
   const [health, setHealth] = useState<HealthTile[]>([]);
+  const [automation, setAutomation] = useState<{ enabled: boolean; mode: string; recommendation: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const equitySeries = useRef<EquitySample[]>([]);
@@ -68,6 +69,15 @@ export default function DashboardPage() {
       );
     } catch {
       setBreaker(null);
+    }
+    try {
+      const autoState = await api.get<{ enabled: boolean; mode: string; recommendation: string }>(
+        "/api/automation/state",
+        { silent: true },
+      );
+      setAutomation(autoState);
+    } catch {
+      setAutomation(null);
     }
     setLoading(false);
   }, [accountId]);
@@ -147,6 +157,33 @@ export default function DashboardPage() {
           value={fmtMoney(account?.free_margin, account?.currency)}
           sub={`Margin used ${fmtMoney(account?.margin_used, account?.currency)}`}
         />
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <SectionTitle>Automation</SectionTitle>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontWeight: 600 }}>
+              {automation?.enabled ? "Auto mode active" : "Auto mode paused"}
+            </div>
+            <div className="muted" style={{ marginTop: 4 }}>
+              {automation?.recommendation ?? "Waiting for automation status..."}
+            </div>
+          </div>
+          <button
+            className="btn"
+            onClick={async () => {
+              const next = await api.post<{ enabled: boolean; mode: string; recommendation: string }>(
+                "/api/automation/toggle",
+                undefined,
+                { silent: true },
+              );
+              setAutomation(next);
+            }}
+          >
+            {automation?.enabled ? "Disable automation" : "Enable automation"}
+          </button>
+        </div>
       </div>
 
       <div className="grid-2" style={{ marginTop: 16 }}>

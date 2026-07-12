@@ -116,7 +116,60 @@ def test_buy_averages_position_price(client, account, monkeypatch):
     assert positions[0]["average_price"] == pytest.approx(105.0, **APPROX)
 
 
-def test_duplicate_order_id_conflict(client, account):
+def test_duplicate_order_id_replays_without_refilling(client, account):
+    """Idempotency: re-sending the same order replays the original report
+    (raw.replayed=true) and never touches cash/positions twice."""
     payload = make_order_payload(quantity=1, price=100)
+    first = client.post("/paper/orders", json=payload)
+    assert first.status_code == 200
+    cash_after_first = client.get("/paper/accounts/acct-1").json()["cash"]
+
+    second = client.post("/paper/orders", json=payload)
+    assert second.status_code == 200
+    replay = second.json()
+    assert replay["raw"]["replayed"] is True
+    assert replay["order_id"] == first.json()["order_id"]
+    assert replay["status"] == first.json()["status"]
+    assert replay["filled_quantity"] == first.json()["filled_quantity"]
+    assert replay["average_fill_price"] == first.json()["average_fill_price"]
+
+    # No double effect on the account.
+    assert client.get("/paper/accounts/acct-1").json()["cash"] == cash_after_first
+    assert client.get("/paper/positions/acct-1").json()[0]["quantity"] == 1.0
+
+
+def test_duplicate_client_order_id_replays_even_with_new_order_id(client, account):
+    """Retries may mint a new order_id but MUST reuse the client_order_id;
+    dedupe keys on the client id."""
+    import uuid as _uuid
+
+    key = str(_uuid.uuid4())
+    payload = make_order_payload(quantity=2, price=100)
+    payload["client_order_id"] = key
     assert client.post("/paper/orders", json=payload).status_code == 200
-    assert client.post("/paper/orders", json=payload).status_code == 409
+    cash_after_first = client.get("/paper/accounts/acct-1").json()["cash"]
+
+    retry = dict(payload, order_id=str(_uuid.uuid4()))  # new id, same key
+    response = client.post("/paper/orders", json=retry)
+    assert response.status_code == 200
+    assert response.json()["raw"]["replayed"] is True
+    assert client.get("/paper/accounts/acct-1").json()["cash"] == cash_after_first
+    assert client.get("/paper/positions/acct-1").json()[0]["quantity"] == 2.0
+
+
+def test_order_lookup_by_client_order_id(client, account):
+    """execution-engine queries GET /paper/orders/{client_order_id} before
+    re-sending after a timeout."""
+    import uuid as _uuid
+
+    key = str(_uuid.uuid4())
+    payload = make_order_payload(quantity=1, price=100)
+    payload["client_order_id"] = key
+    client.post("/paper/orders", json=payload)
+
+    by_key = client.get(f"/paper/orders/{key}")
+    assert by_key.status_code == 200
+    assert by_key.json()["order_id"] == payload["order_id"]
+    assert by_key.json()["client_order_id"] == key
+
+    assert client.get(f"/paper/orders/{_uuid.uuid4()}").status_code == 404

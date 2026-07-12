@@ -32,7 +32,13 @@ TRANSIENT_STATUS_CODES = {409, 500, 502, 503, 504}
 
 @runtime_checkable
 class ExecutionTransport(Protocol):
-    """What the execution pipeline needs from any execution venue."""
+    """What the execution pipeline needs from any execution venue.
+
+    ``fetch_order_report`` is the idempotency query used before any re-send:
+    given the order (whose id is the persisted client_order_id), return the
+    venue's report if it already holds that client_order_id, or None if it is
+    provably unknown there. Optional: transports without it fall back to a
+    blind re-send with the same client_order_id."""
 
     mode: ExecutionMode
     name: str
@@ -50,6 +56,14 @@ async def _post_json(url: str, payload: dict) -> httpx.Response:
     try:
         async with httpx.AsyncClient(timeout=config.transport_timeout()) as client:
             return await client.post(url, json=payload)
+    except httpx.HTTPError as exc:
+        raise TransientTransportError(f"transport unreachable: {exc}") from exc
+
+
+async def _get_json(url: str, params: dict | None = None) -> httpx.Response:
+    try:
+        async with httpx.AsyncClient(timeout=config.transport_timeout()) as client:
+            return await client.get(url, params=params)
     except httpx.HTTPError as exc:
         raise TransientTransportError(f"transport unreachable: {exc}") from exc
 
@@ -88,6 +102,7 @@ class PaperTransport:
             )
         payload = {
             "order_id": str(order.id),
+            "client_order_id": str(order.id),  # idempotency key == child order id
             "signal_id": str(order.signal_id),
             "account_id": order.account_id,
             "symbol": order.symbol,
@@ -99,6 +114,30 @@ class PaperTransport:
         response = await _post_json(f"{self.base_url}/paper/orders", payload)
         _raise_for_status(response, self.name)
         return ExecutionReport.model_validate(response.json())
+
+    async def fetch_order_report(self, order: Order) -> ExecutionReport | None:
+        """Idempotency query before a re-send: does paper-trading already hold
+        this client_order_id? 404 -> provably unknown (safe to re-place);
+        anything else unexpected -> transient (keep backing off, never
+        re-place blind)."""
+        response = await _get_json(f"{self.base_url}/paper/orders/{order.id}")
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 400:
+            raise TransientTransportError(
+                f"{self.name} order query returned {response.status_code}: "
+                f"{response.text[:300]}"
+            )
+        detail = response.json()
+        return ExecutionReport(
+            order_id=order.id,
+            status=detail["status"],
+            filled_quantity=detail.get("filled_quantity", 0.0),
+            average_fill_price=detail.get("average_fill_price"),
+            broker="paper",
+            reported_at=detail.get("created_at"),
+            raw=dict(detail.get("raw") or {}, replayed=True),
+        )
 
     async def cancel_order(self, order_id: str, *, broker: str, account_id: str) -> bool:
         try:
@@ -140,6 +179,37 @@ class LiveTransport:
             f"{self.base_url}/connectors/{order.broker}/orders", payload
         )
         _raise_for_status(response, self.name)
+        return ExecutionReport.model_validate(response.json())
+
+    async def fetch_order_report(self, order: Order) -> ExecutionReport | None:
+        """Idempotency query before a re-send: ask broker-connectors whether
+        the venue already holds this client_order_id.
+
+        - 404: venue confirms the id is unknown -> safe to re-place.
+        - 501: connector cannot query by client_order_id -> None with a
+          warning (legacy blind re-send with the same id, venue-side dedupe).
+        - anything else (401/409/5xx/network): transient -> keep backing off;
+          never re-place while the venue state is unknown.
+        """
+        response = await _get_json(
+            f"{self.base_url}/connectors/{order.broker}/orders/{order.id}",
+            params={"symbol": order.symbol, "account_id": order.account_id},
+        )
+        if response.status_code == 404:
+            return None
+        if response.status_code == 501:
+            logger.warning(
+                "%s cannot query orders by client_order_id for broker %s; "
+                "falling back to re-send with the same client_order_id",
+                self.name,
+                order.broker,
+            )
+            return None
+        if response.status_code >= 400:
+            raise TransientTransportError(
+                f"{self.name} order query returned {response.status_code}: "
+                f"{response.text[:300]}"
+            )
         return ExecutionReport.model_validate(response.json())
 
     async def cancel_order(self, order_id: str, *, broker: str, account_id: str) -> bool:

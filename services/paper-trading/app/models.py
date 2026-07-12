@@ -55,6 +55,11 @@ class PaperOrderRow(Base):
 
     # Caller-supplied order UUID (execution-engine child order id).
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # Caller idempotency key (execution-engine's deterministic child
+    # client_order_id): duplicates replay the stored result, never re-fill.
+    client_order_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
     account_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     symbol: Mapped[str] = mapped_column(String(32), nullable=False)
     side: Mapped[str] = mapped_column(String(8), nullable=False)

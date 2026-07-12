@@ -58,6 +58,12 @@ class ChildOrderRow(Base):
     execution_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("executions.id"), nullable=False, index=True
     )
+    # Deterministic idempotency key sent to the venue (Binance clientOrderId /
+    # paper order id): uuid5(namespace, f"{execution_id}:{sequence}"), persisted
+    # BEFORE any transport attempt so retries always reuse the same id.
+    client_order_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, unique=True, index=True
+    )
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
@@ -80,6 +86,9 @@ class ExecutionReportRow(Base):
     )
     child_order_id: Mapped[str] = mapped_column(String(36), nullable=False)
     report_order_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # The idempotency key of the child order this report belongs to; forwarded
+    # to portfolio-engine so ingestion can dedupe on it.
+    client_order_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     filled_quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     average_fill_price: Mapped[float | None] = mapped_column(Float, nullable=True)

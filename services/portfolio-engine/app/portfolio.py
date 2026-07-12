@@ -101,6 +101,29 @@ def _mark_for(account_id: str, position: PortfolioPosition) -> float:
     return position.average_price
 
 
+def _position_out(account_id: str, position: PortfolioPosition | None) -> Position | None:
+    if position is None:
+        return None
+    return Position(
+        symbol=position.symbol,
+        quantity=position.quantity,
+        average_price=position.average_price,
+        unrealized_pnl=position.unrealized_pnl,
+        account_id=account_id,
+    )
+
+
+def find_ingested(
+    db: Session, account_id: str, client_order_id: str
+) -> PortfolioExecution | None:
+    return db.execute(
+        select(PortfolioExecution).where(
+            PortfolioExecution.account_id == account_id,
+            PortfolioExecution.client_order_id == client_order_id,
+        )
+    ).scalars().first()
+
+
 def apply_execution(
     db: Session, account_id: str, ingest: ExecutionIngest
 ) -> ExecutionIngestResult:
@@ -108,8 +131,26 @@ def apply_execution(
 
     Only fills (filled_quantity > 0 with a fill price) mutate state; other
     statuses are recorded to portfolio_executions for audit only.
+
+    Idempotency guard: when the report carries a client_order_id that was
+    already ingested for this account, nothing is mutated (duplicate=True) —
+    an execution-engine retry or an event replay can never double-count.
     """
     account = get_or_create_account(db, account_id)
+
+    if ingest.client_order_id:
+        existing = find_ingested(db, account_id, ingest.client_order_id)
+        if existing is not None:
+            position = _get_position(db, account_id, ingest.symbol)
+            return ExecutionIngestResult(
+                account_id=account_id,
+                symbol=ingest.symbol,
+                applied=False,
+                duplicate=True,
+                realized_pnl_delta=0.0,
+                position=_position_out(account_id, position),
+                cash=account.cash,
+            )
 
     fill_qty = ingest.filled_quantity or 0.0
     price = ingest.average_fill_price
@@ -173,6 +214,8 @@ def apply_execution(
         PortfolioExecution(
             account_id=account_id,
             order_id=str(ingest.order_id),
+            client_order_id=ingest.client_order_id,
+            source="trading",
             symbol=ingest.symbol,
             side=ingest.side.value,
             status=ingest.status.value,
@@ -188,21 +231,12 @@ def apply_execution(
     _update_peak_equity(db, account)
     db.commit()
 
-    position_out = None
-    if position is not None:
-        position_out = Position(
-            symbol=position.symbol,
-            quantity=position.quantity,
-            average_price=position.average_price,
-            unrealized_pnl=position.unrealized_pnl,
-            account_id=account_id,
-        )
     return ExecutionIngestResult(
         account_id=account_id,
         symbol=ingest.symbol,
         applied=applies,
         realized_pnl_delta=realized_delta,
-        position=position_out,
+        position=_position_out(account_id, position),
         cash=account.cash,
     )
 

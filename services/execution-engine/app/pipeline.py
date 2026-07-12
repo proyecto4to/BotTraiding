@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -30,14 +30,34 @@ logger = logging.getLogger("execution-engine.pipeline")
 
 OPEN_CHILD_STATUSES = {OrderStatus.SUBMITTED.value, OrderStatus.PARTIALLY_FILLED.value}
 
+# Status for in-flight executions found stale at startup: the venue may or may
+# not hold the order, so nothing is assumed until reconciliation resolves it.
+UNKNOWN_STATUS = "unknown"
+STALE_MARKABLE_STATUSES = {OrderStatus.SUBMITTED.value, OrderStatus.PARTIALLY_FILLED.value}
 
-def build_ingest_payload(order: Order, report: ExecutionReport) -> dict:
+# Fixed namespace for deterministic child client_order_ids. Never change this
+# value: retried/replayed executions must derive the same ids forever.
+CLIENT_ORDER_NAMESPACE = uuid.UUID("6de4f7a9-52f6-4a68-9713-6f34f1e5c0d7")
+
+
+def child_client_order_id(execution_id: str, sequence: int) -> str:
+    """Deterministic venue idempotency key for one child order.
+
+    uuid5 over execution id + child index: exactly 36 chars (the Binance
+    clientOrderId maximum), stable across retries and process restarts."""
+    return str(uuid.uuid5(CLIENT_ORDER_NAMESPACE, f"{execution_id}:{sequence}"))
+
+
+def build_ingest_payload(
+    order: Order, report: ExecutionReport, client_order_id: str | None = None
+) -> dict:
     """ExecutionIngest body for portfolio-engine
     POST /portfolio/{account_id}/executions: the shared ExecutionReport
     fields plus the symbol/side context the contract does not carry."""
     commission = report.raw.get("commission", 0.0) if report.raw else 0.0
     return {
         "order_id": str(report.order_id),
+        "client_order_id": client_order_id,
         "status": report.status.value,
         "filled_quantity": report.filled_quantity,
         "average_fill_price": report.average_fill_price,
@@ -80,8 +100,10 @@ def _aggregate(execution: ExecutionRow, children: list[ChildOrderRow]) -> None:
 
 
 def _child_order_model(parent: Order, child: ChildOrderRow) -> Order:
+    # The Order.id sent to the venue IS the child's persisted client_order_id
+    # (idempotency key): retries and post-timeout queries reuse it verbatim.
     return Order(
-        id=uuid.UUID(child.id),
+        id=uuid.UUID(child.client_order_id or child.id),
         signal_id=parent.signal_id,
         symbol=parent.symbol,
         side=parent.side,
@@ -123,12 +145,21 @@ async def run_execution(
     db.add(execution)
     db.flush()
 
-    children = [
-        ChildOrderRow(execution_id=execution.id, sequence=index, quantity=quantity)
-        for index, quantity in enumerate(
-            split_order(order.quantity, config.max_child_size())
+    # Child rows (with their deterministic client_order_ids) are flushed
+    # BEFORE any transport attempt: a crash/timeout mid-placement can always
+    # be reconciled against the persisted idempotency keys.
+    children = []
+    for index, quantity in enumerate(split_order(order.quantity, config.max_child_size())):
+        cid = child_client_order_id(execution.id, index)
+        children.append(
+            ChildOrderRow(
+                id=cid,
+                client_order_id=cid,
+                execution_id=execution.id,
+                sequence=index,
+                quantity=quantity,
+            )
         )
-    ]
     db.add_all(children)
     db.flush()
 
@@ -176,6 +207,7 @@ async def run_execution(
         report_row = ExecutionReportRow(
             execution_id=execution.id,
             child_order_id=child.id,
+            client_order_id=child.client_order_id,
             report_order_id=str(report.order_id),
             status=report.status.value,
             filled_quantity=report.filled_quantity,
@@ -189,7 +221,8 @@ async def run_execution(
 
         if report.filled_quantity > 0:
             report_row.forwarded_to_portfolio = await forwarder.forward(
-                order.account_id, build_ingest_payload(order, report)
+                order.account_id,
+                build_ingest_payload(order, report, child.client_order_id),
             )
 
         await events.publish_event(
@@ -212,6 +245,50 @@ async def run_execution(
     _aggregate(execution, children)
     db.flush()
     return execution
+
+
+def mark_stale_executions(
+    db: Session, *, stale_after_seconds: float, now: datetime | None = None
+) -> list[dict]:
+    """Startup safety net (architecture principle 2.6): in-flight executions
+    (submitted/partially_filled) whose last update is older than
+    ``stale_after_seconds`` are marked ``unknown`` — the venue may or may not
+    hold them, so leaving them silently in-flight would lie about state.
+    They are surfaced via GET /executions?status=unknown until reconciliation
+    resolves them. Returns a summary dict per marked execution."""
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now - timedelta(seconds=stale_after_seconds)
+    rows = db.execute(
+        select(ExecutionRow).where(ExecutionRow.status.in_(STALE_MARKABLE_STATUSES))
+    ).scalars()
+
+    marked: list[dict] = []
+    for execution in rows:
+        anchor = execution.updated_at or execution.created_at
+        if anchor is None or anchor > cutoff:
+            continue
+        execution.status = UNKNOWN_STATUS
+        for child in children_of(db, execution.id):
+            if child.status in OPEN_CHILD_STATUSES:
+                child.status = UNKNOWN_STATUS
+                child.last_error = (
+                    "stale in-flight at startup; needs reconciliation against the venue"
+                )
+        marked.append(
+            {
+                "execution_id": execution.id,
+                "order_id": execution.order_id,
+                "account_id": execution.account_id,
+                "symbol": execution.symbol,
+                "broker": execution.broker,
+                "execution_mode": execution.execution_mode,
+                "previous_status": "in-flight",
+                "status": UNKNOWN_STATUS,
+                "last_update": anchor.isoformat(),
+            }
+        )
+    db.flush()
+    return marked
 
 
 def children_of(db: Session, execution_id: str) -> list[ChildOrderRow]:

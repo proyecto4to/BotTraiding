@@ -83,6 +83,7 @@ def _account_response(db: Session, account: PaperAccountRow) -> PaperAccountResp
 def _order_detail(row: PaperOrderRow) -> PaperOrderDetail:
     return PaperOrderDetail(
         order_id=row.id,
+        client_order_id=row.client_order_id,
         account_id=row.account_id,
         symbol=row.symbol,
         side=row.side,
@@ -146,20 +147,21 @@ async def place_order(
 ) -> ExecutionReport:
     """Fill the order against the caller-supplied market price, applying
     spread/slippage/size-impact/commission/latency/partial-fill/reject
-    simulation. Returns a shared-contract ExecutionReport."""
-    try:
-        report = await engine.execute_order(db, body, config)
-    except engine.DuplicateOrderError as exc:
-        raise HTTPException(
-            status_code=409, detail=f"order '{exc}' was already processed"
-        ) from exc
+    simulation. Returns a shared-contract ExecutionReport.
+
+    Idempotent by client_order_id (or order_id when no explicit key is
+    sent): a duplicate replays the original ExecutionReport (marked
+    raw.replayed=true) and never fills twice."""
+    report = await engine.execute_order(db, body, config)
     db.commit()
     return report
 
 
 @app.get("/paper/orders/{order_id}", response_model=PaperOrderDetail)
 def get_order(order_id: str, db: Session = Depends(get_db)) -> PaperOrderDetail:
-    row = db.get(PaperOrderRow, order_id)
+    """Order lookup by order_id OR client_order_id (execution-engine's
+    idempotency query before re-sending after a timeout)."""
+    row = engine.find_order(db, order_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"unknown paper order '{order_id}'")
     return _order_detail(row)

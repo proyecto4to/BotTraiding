@@ -15,6 +15,9 @@ Env vars:
 - PAPER_TRADING_URL / BROKER_CONNECTORS_URL / PORTFOLIO_ENGINE_URL:
   downstream service base URLs.
 - EXECUTION_TRANSPORT_TIMEOUT: HTTP timeout towards transports (default 10s).
+- EXECUTION_STALE_AFTER_SECONDS: at startup, in-flight executions
+  (submitted/partially_filled) older than this are marked "unknown - needs
+  reconciliation" instead of being left silently in-flight (default 900).
 - JWT_SECRET: shared with auth-service (trading_contracts.auth).
 - NATS_URL: optional event bus; events fall back to logging when unset.
 """
@@ -68,3 +71,7 @@ def portfolio_engine_url() -> str:
 
 def transport_timeout() -> float:
     return float(os.environ.get("EXECUTION_TRANSPORT_TIMEOUT", "10"))
+
+
+def stale_after_seconds() -> float:
+    return float(os.environ.get("EXECUTION_STALE_AFTER_SECONDS", "900"))

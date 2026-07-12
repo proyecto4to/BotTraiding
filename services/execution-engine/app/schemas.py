@@ -29,6 +29,7 @@ class ExecutionRequest(BaseModel):
 
 class ChildOrderOut(BaseModel):
     id: str
+    client_order_id: Optional[str] = None  # deterministic venue idempotency key
     sequence: int
     quantity: float
     status: str

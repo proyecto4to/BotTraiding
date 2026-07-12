@@ -20,6 +20,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     JSON,
     String,
     UniqueConstraint,
@@ -85,6 +86,17 @@ class PortfolioExecution(Base):
     shared ExecutionReport contract does not carry."""
 
     __tablename__ = "portfolio_executions"
+    __table_args__ = (
+        # Idempotent ingestion: one applied report per client_order_id per
+        # account. Nullable key (legacy reports) — both Postgres and SQLite
+        # allow multiple NULLs under a unique index.
+        Index(
+            "uq_portfolio_executions_client_order",
+            "account_id",
+            "client_order_id",
+            unique=True,
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     account_id: Mapped[str] = mapped_column(
@@ -93,6 +105,12 @@ class PortfolioExecution(Base):
         nullable=False,
     )
     order_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # Deterministic venue idempotency key from execution-engine; ingesting the
+    # same report twice must not double-count (dedupe guard).
+    client_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # "trading" for normal ExecutionReport flow; "reconciliation" for synthetic
+    # adjustments created when local state is aligned to broker truth.
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="trading")
     symbol: Mapped[str] = mapped_column(String(50), nullable=False)
     side: Mapped[str] = mapped_column(String(4), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)

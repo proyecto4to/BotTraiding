@@ -69,10 +69,27 @@ class ExecutionRouter:
         self, order: Order, market_price: float | None
     ) -> tuple[ExecutionReport, int]:
         """Place ``order`` on its mode's transport, retrying transient
-        failures with exponential backoff. Returns (report, attempts)."""
+        failures with exponential backoff. Returns (report, attempts).
+
+        Idempotency: ``order.id`` is the persisted client_order_id, and every
+        retry AFTER a send attempt first asks the venue whether that
+        client_order_id already exists (``fetch_order_report``). A retry after
+        a timeout therefore can never double-place: if the venue accepted the
+        first attempt, the query returns its report and nothing is re-sent.
+        Transports without ``fetch_order_report`` fall back to a blind re-send
+        with the same client_order_id, letting the venue dedupe.
+        """
         transport = self.transport_for(order.execution_mode)
+        fetch = getattr(transport, "fetch_order_report", None)
+        sent = False
 
         async def attempt() -> ExecutionReport:
+            nonlocal sent
+            if sent and fetch is not None:
+                existing = await fetch(order)
+                if existing is not None:
+                    return existing
+            sent = True  # set BEFORE the send: a timeout may still have placed it
             return await transport.place_order(order, market_price)
 
         return await retry_with_backoff(

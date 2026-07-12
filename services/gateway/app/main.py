@@ -20,6 +20,16 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app import market_config, proxy
 from app.audit import AuditMiddleware
 
+
+class AutomationState:
+    def __init__(self) -> None:
+        self.enabled = False
+        self.mode = "manual"
+        self.recommendation = "Waiting for market data and recent performance."
+
+
+AUTOMATION_STATE = AutomationState()
+
 SERVICE_NAME = "gateway"
 
 
@@ -74,3 +84,24 @@ def health() -> dict:
 def ready() -> dict:
     """Readiness probe: the service is ready to receive traffic."""
     return {"status": "ready", "service": SERVICE_NAME}
+
+
+@app.get("/api/automation/state")
+def automation_state() -> dict:
+    return {
+        "enabled": AUTOMATION_STATE.enabled,
+        "mode": AUTOMATION_STATE.mode,
+        "recommendation": AUTOMATION_STATE.recommendation,
+    }
+
+
+@app.post("/api/automation/toggle")
+def toggle_automation() -> dict:
+    AUTOMATION_STATE.enabled = not AUTOMATION_STATE.enabled
+    AUTOMATION_STATE.mode = "auto" if AUTOMATION_STATE.enabled else "manual"
+    AUTOMATION_STATE.recommendation = (
+        "Automation is active. Risk controls remain enforced."
+        if AUTOMATION_STATE.enabled
+        else "Automation is paused. You can re-enable it at any time."
+    )
+    return automation_state()

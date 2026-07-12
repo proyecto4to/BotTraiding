@@ -23,6 +23,7 @@ held quantity are REJECTED with reason "insufficient_position".
 from __future__ import annotations
 
 import asyncio
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -40,8 +41,34 @@ BROKER_NAME = "paper"
 _sleep = asyncio.sleep
 
 
-class DuplicateOrderError(Exception):
-    """The order id was already processed (idempotency guard)."""
+def find_order(db: Session, key: str) -> PaperOrderRow | None:
+    """Look an order up by primary key OR by caller client_order_id."""
+    row = db.get(PaperOrderRow, key)
+    if row is not None:
+        return row
+    return db.execute(
+        select(PaperOrderRow).where(PaperOrderRow.client_order_id == key)
+    ).scalar_one_or_none()
+
+
+def replay_report(row: PaperOrderRow) -> ExecutionReport:
+    """Rebuild the ExecutionReport originally produced for ``row``.
+
+    Idempotency contract: re-submitting an already-processed
+    order_id/client_order_id returns this replay; cash and positions are
+    never touched twice."""
+    reported_at = row.created_at or datetime.now(timezone.utc)
+    if reported_at.tzinfo is None:
+        reported_at = reported_at.replace(tzinfo=timezone.utc)
+    return ExecutionReport(
+        order_id=uuid.UUID(row.id),
+        status=OrderStatus(row.status),
+        filled_quantity=row.filled_quantity,
+        average_fill_price=row.average_fill_price,
+        broker=BROKER_NAME,
+        reported_at=reported_at,
+        raw=dict(row.raw or {}, replayed=True),
+    )
 
 
 def get_or_create_account(
@@ -129,6 +156,7 @@ def _reject(
     db.add(
         PaperOrderRow(
             id=str(request.order_id),
+            client_order_id=request.client_order_id or str(request.order_id),
             account_id=request.account_id,
             symbol=request.symbol,
             side=request.side.value,
@@ -157,8 +185,14 @@ def _reject(
 async def execute_order(
     db: Session, request: PaperOrderRequest, config: FillConfig
 ) -> ExecutionReport:
-    if db.get(PaperOrderRow, str(request.order_id)) is not None:
-        raise DuplicateOrderError(str(request.order_id))
+    # Idempotency by client_order_id (or order_id when the caller sends no
+    # explicit key): a duplicate replays the original result — a retry after
+    # a timeout can never fill twice.
+    existing = find_order(db, request.client_order_id or str(request.order_id))
+    if existing is None and request.client_order_id is not None:
+        existing = find_order(db, str(request.order_id))
+    if existing is not None:
+        return replay_report(existing)
 
     account = get_or_create_account(db, request.account_id, config)
 
@@ -219,6 +253,7 @@ async def execute_order(
     db.add(
         PaperOrderRow(
             id=str(request.order_id),
+            client_order_id=request.client_order_id or str(request.order_id),
             account_id=request.account_id,
             symbol=request.symbol,
             side=request.side.value,

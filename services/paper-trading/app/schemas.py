@@ -39,6 +39,12 @@ class PaperOrderRequest(BaseModel):
     """
 
     order_id: UUID
+    client_order_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="caller idempotency key; a duplicate replays the original "
+        "ExecutionReport instead of filling twice (defaults to order_id)",
+    )
     signal_id: Optional[UUID] = None
     account_id: str
     symbol: str
@@ -50,6 +56,7 @@ class PaperOrderRequest(BaseModel):
 
 class PaperOrderDetail(BaseModel):
     order_id: str
+    client_order_id: Optional[str] = None
     account_id: str
     symbol: str
     side: str

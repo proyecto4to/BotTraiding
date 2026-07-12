@@ -25,6 +25,12 @@ class ExecutionIngest(BaseModel):
     """
 
     order_id: UUID
+    client_order_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="execution-engine's deterministic venue idempotency key; "
+        "ingesting the same client_order_id twice is a no-op",
+    )
     status: OrderStatus
     filled_quantity: float = 0.0
     average_fill_price: Optional[float] = None
@@ -92,6 +98,61 @@ class ExecutionIngestResult(BaseModel):
     account_id: str
     symbol: str
     applied: bool
+    duplicate: bool = False  # same client_order_id already ingested: no-op
     realized_pnl_delta: float = 0.0
     position: Optional[Position] = None
     cash: float = 0.0
+
+
+# --- reconciliation (broker truth vs local state) ---------------------------
+
+
+class ReconcileEntry(BaseModel):
+    """One symbol compared between local portfolio state and broker truth."""
+
+    symbol: str
+    local_quantity: float = 0.0
+    broker_quantity: float = 0.0
+    difference: float = 0.0  # broker - local
+    broker_average_price: Optional[float] = None
+
+
+class ReconciliationAdjustment(BaseModel):
+    """One applied correction, recorded as a synthetic execution
+    (portfolio_executions.source == "reconciliation")."""
+
+    symbol: str
+    kind: str  # missing_locally | missing_at_broker | quantity_mismatch
+    adjustment_quantity: float  # signed broker - local delta applied
+    side: str  # buy | sell (direction of the synthetic execution)
+    price_used: float
+    execution_id: str  # portfolio_executions.id of the audit row
+
+
+class ReconciliationReport(BaseModel):
+    account_id: str
+    broker: str
+    broker_account_id: str
+    tolerance: float
+    matched: list[ReconcileEntry] = Field(default_factory=list)
+    missing_locally: list[ReconcileEntry] = Field(default_factory=list)
+    missing_at_broker: list[ReconcileEntry] = Field(default_factory=list)
+    quantity_mismatches: list[ReconcileEntry] = Field(default_factory=list)
+    discrepancies: int = 0
+    local_cash: Optional[float] = None
+    broker_balance: Optional[float] = None
+    applied: bool = False
+    adjustments: list[ReconciliationAdjustment] = Field(default_factory=list)
+    generated_at: datetime
+
+
+class ReconcileRequest(BaseModel):
+    """Body of POST /portfolio/{account_id}/reconcile (admin only).
+
+    apply=false (default) only reports; apply=true aligns local positions to
+    broker truth, recording each adjustment as an auditable synthetic
+    execution and publishing a reconciliation event."""
+
+    broker: str
+    broker_account_id: Optional[str] = None  # defaults to the path account_id
+    apply: bool = False

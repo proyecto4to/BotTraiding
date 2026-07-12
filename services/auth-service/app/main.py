@@ -6,6 +6,7 @@ Responsabilidad (docs/ARCHITECTURE.md seccion 3): Usuarios, JWT, OAuth, MFA, rol
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 
 import pyotp
@@ -111,6 +112,26 @@ def _issue_token_pair(db: Session, user: User) -> tuple[str, str]:
 # --------------------------------------------------------------------------
 
 
+def _maybe_bootstrap_admin(db: Session, user: User) -> None:
+    """Primer administrador via AUTH_BOOTSTRAP_ADMIN_EMAIL.
+
+    Sin esto no hay forma de crear un admin (asignar roles exige ser admin).
+    Aplica en registro y login, solo si el email coincide y todavia no existe
+    ningun usuario con rol admin.
+    """
+    bootstrap_email = os.environ.get("AUTH_BOOTSTRAP_ADMIN_EMAIL", "")
+    if not bootstrap_email or user.email.lower() != bootstrap_email.lower():
+        return
+    admin_role = _get_or_create_role(db, "admin")
+    admin_exists = db.scalar(select(UserRole).where(UserRole.role_id == admin_role.id))
+    if admin_exists is not None:
+        return
+    db.add(UserRole(user_id=user.id, role_id=admin_role.id))
+    db.commit()
+    db.refresh(user)
+    audit_record(db, actor=user.id, action="bootstrap-admin", metadata={"email": user.email})
+
+
 @app.post("/auth/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)) -> UserOut:
     existing = db.scalar(select(User).where(User.email == payload.email))
@@ -126,6 +147,8 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
     db.add(UserRole(user_id=user.id, role_id=role.id))
     db.commit()
     db.refresh(user)
+
+    _maybe_bootstrap_admin(db, user)
 
     try:
         audit_record(
@@ -150,6 +173,8 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
             metadata={"ip": _client_ip(request)},
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    _maybe_bootstrap_admin(db, user)
 
     if user.mfa_enabled:
         pending = security.create_mfa_pending_token(user.id)

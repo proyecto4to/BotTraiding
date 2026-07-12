@@ -69,6 +69,31 @@ CANCELLABLE_EXECUTION_STATUSES = {
 }
 
 
+@app.on_event("startup")
+async def _mark_stale_inflight_executions() -> None:
+    """Startup reconciliation guard (architecture principle 2.6): in-flight
+    executions older than EXECUTION_STALE_AFTER_SECONDS are marked
+    'unknown' (needs reconciliation) instead of lying about being live.
+    Exposed via GET /executions?status=unknown. Never touches the venue."""
+    from . import db as db_module  # late import: tests swap SessionLocal
+
+    try:
+        with db_module.SessionLocal() as session:
+            marked = pipeline.mark_stale_executions(
+                session, stale_after_seconds=config.stale_after_seconds()
+            )
+            session.commit()
+    except Exception:  # noqa: BLE001 - startup must not crash on a DB hiccup
+        logger.exception("startup stale-execution marking failed")
+        return
+
+    for item in marked:
+        logger.warning(
+            "stale_execution_marked_unknown %s", json.dumps(item, default=str)
+        )
+        await events.publish_event("execution.marked_unknown", item)
+
+
 @app.get("/health")
 def health() -> dict:
     """Liveness probe: the process is up."""
@@ -106,6 +131,7 @@ def _to_out(
         child_orders=[
             ChildOrderOut(
                 id=child.id,
+                client_order_id=child.client_order_id,
                 sequence=child.sequence,
                 quantity=child.quantity,
                 status=child.status,

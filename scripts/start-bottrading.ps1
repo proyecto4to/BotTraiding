@@ -21,6 +21,9 @@ $env:Path = "C:\Program Files\nodejs;$env:Path"
 # Auth firma con este valor por defecto; el gateway y demas servicios NECESITAN
 # la variable definida para verificar tokens.
 if (-not $env:JWT_SECRET) { $env:JWT_SECRET = 'dev-insecure-secret-change-me' }
+# El primer usuario que se registre con este email recibe rol admin
+# (solo si aun no existe ningun admin).
+if (-not $env:AUTH_BOOTSTRAP_ADMIN_EMAIL) { $env:AUTH_BOOTSTRAP_ADMIN_EMAIL = 'proyecto4toano@gmail.com' }
 $env:CORS_ORIGINS = 'http://localhost:3000,http://127.0.0.1:3000'
 $env:EXECUTION_MODE = 'paper'
 
