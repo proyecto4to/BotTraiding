@@ -13,4 +13,7 @@ COPY services/trading-engine services/trading-engine
 
 WORKDIR /app/services/trading-engine
 EXPOSE 8000
+COPY services/trading-engine/docker-entrypoint.sh /app/services/trading-engine/docker-entrypoint.sh
+RUN chmod +x /app/services/trading-engine/docker-entrypoint.sh
+ENTRYPOINT ["/app/services/trading-engine/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
