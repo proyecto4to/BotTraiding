@@ -379,6 +379,17 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in infra/docker/.env, see .env.example}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      WEBHOOK_SIGNING_DEFAULT_SECRET: ${WEBHOOK_SIGNING_DEFAULT_SECRET:-}
+      NOTIFY_MAX_RETRIES: ${NOTIFY_MAX_RETRIES:-3}
+      NOTIFY_RETRY_BACKOFF: ${NOTIFY_RETRY_BACKOFF:-0.5}
+      NOTIFY_INGEST_TOKEN: ${NOTIFY_INGEST_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -425,12 +436,28 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in infra/docker/.env, see .env.example}
+      STRATEGY_ENGINE_URL: http://strategy-engine:8000
+      RISK_ENGINE_URL: http://risk-engine:8000
+      EXECUTION_ENGINE_URL: http://execution-engine:8000
+      BROKER_CONNECTORS_URL: http://broker-connectors:8000
+      TRADING_HTTP_TIMEOUT: ${TRADING_HTTP_TIMEOUT:-10}
+      BOT_MAX_CONSECUTIVE_ERRORS: ${BOT_MAX_CONSECUTIVE_ERRORS:-5}
+      BOT_BAR_LOOKBACK: ${BOT_BAR_LOOKBACK:-100}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       nats:
+        condition: service_started
+      strategy-engine:
+        condition: service_started
+      risk-engine:
+        condition: service_started
+      execution-engine:
+        condition: service_started
+      broker-connectors:
         condition: service_started
 
   frontend:
