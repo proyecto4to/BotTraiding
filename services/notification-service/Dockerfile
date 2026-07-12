@@ -13,4 +13,7 @@ COPY services/notification-service services/notification-service
 
 WORKDIR /app/services/notification-service
 EXPOSE 8000
+COPY services/notification-service/docker-entrypoint.sh /app/services/notification-service/docker-entrypoint.sh
+RUN chmod +x /app/services/notification-service/docker-entrypoint.sh
+ENTRYPOINT ["/app/services/notification-service/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
