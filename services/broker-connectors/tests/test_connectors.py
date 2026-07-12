@@ -19,9 +19,12 @@ from trading_contracts.models import ExecutionMode, Order, OrderSide, OrderType
 
 from .conftest import default_handler, make_mock_client
 
+# NOTE: BinanceConnector is intentionally NOT in this list anymore: it now
+# targets the real Binance REST/websocket API (see test_binance*.py for its
+# dedicated suite) instead of the placeholder paths served by
+# ``default_handler`` that the 6 still-stubbed connectors share.
 HTTP_CONNECTOR_CLASSES = [
     AlpacaConnector,
-    BinanceConnector,
     BybitConnector,
     InteractiveBrokersConnector,
     KrakenConnector,

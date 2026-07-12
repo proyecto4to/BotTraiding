@@ -93,8 +93,10 @@ class BaseHTTPConnector(BrokerConnector):
             self._client = httpx.AsyncClient(base_url=self.base_url, headers=self._auth_headers())
         return self._client
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        await self._rate_limiter.acquire()
+    async def _request(
+        self, method: str, path: str, *, weight: float = 1.0, **kwargs: Any
+    ) -> httpx.Response:
+        await self._rate_limiter.acquire(weight)
         client = await self._ensure_client()
         response = await client.request(method, path, **kwargs)
         response.raise_for_status()

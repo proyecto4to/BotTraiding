@@ -14,12 +14,19 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 
 from trading_contracts.models import AccountState, Bar, ExecutionReport, Order, Position
 
+from .connectors.errors import (
+    ConnectorRateLimitError,
+    OrderNotFoundError,
+    OrderRejectedError,
+    UnsupportedTimeframeError,
+)
 from .connectors.http_base import BrokerConfig
 from .credential_store import BrokerCredentials, InMemoryCredentialStore
 from .registry import CONNECTOR_CLASSES, registry
@@ -85,6 +92,28 @@ class CancelOrderResponse(BaseModel):
     account_id: str
     order_id: str
     cancelled: bool
+
+
+# Typed connector errors -> meaningful HTTP statuses (instead of a blanket
+# 500) so trading-engine can distinguish "order rejected by exchange filters"
+# from "broker throttling us".
+_CONNECTOR_ERROR_STATUS: list[tuple[type[Exception], int]] = [
+    (ConnectorRateLimitError, 429),
+    (OrderNotFoundError, 404),
+    (UnsupportedTimeframeError, 422),
+    (OrderRejectedError, 422),
+]
+
+
+def _register_connector_error_handlers() -> None:
+    for error_cls, status_code in _CONNECTOR_ERROR_STATUS:
+        def handler(request: Request, exc: Exception, status_code: int = status_code) -> JSONResponse:
+            return JSONResponse(status_code=status_code, content={"detail": str(exc)})
+
+        app.add_exception_handler(error_cls, handler)
+
+
+_register_connector_error_handlers()
 
 
 def _require_known_broker(broker: str) -> None:
@@ -176,11 +205,55 @@ async def get_account(broker: str, account_id: str = "default") -> AccountState:
 
 @app.get("/connectors/{broker}/historical", response_model=list[Bar])
 async def get_historical(
-    broker: str, symbol: str, timeframe: str, start: datetime, end: datetime, account_id: str = "default"
+    broker: str,
+    symbol: str,
+    timeframe: str,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    limit: Optional[int] = None,
+    account_id: str = "default",
 ) -> list[Bar]:
+    """Historical bars for trading-engine.
+
+    Two request shapes (existing ``start``+``end`` contract is unchanged):
+    * ``start`` + ``end``: explicit range (all connectors).
+    * ``limit``: last N bars, for connectors exposing ``get_recent_bars``
+      (binance today).
+    """
     _require_known_broker(broker)
     connector = _require_connected(broker, account_id)
-    return await connector.get_historical_data(symbol, timeframe, start, end)
+    if start is not None and end is not None:
+        return await connector.get_historical_data(symbol, timeframe, start, end)
+    if limit is not None:
+        if not hasattr(connector, "get_recent_bars"):
+            raise HTTPException(
+                status_code=422, detail=f"{broker} does not support limit-based history; pass start and end"
+            )
+        return await connector.get_recent_bars(symbol, timeframe, limit)
+    raise HTTPException(status_code=422, detail="provide either start and end, or limit")
+
+
+class StreamStatusResponse(BaseModel):
+    broker: str
+    account_id: str
+    connected: bool
+    streaming: bool
+    streams: list[str] = []
+
+
+@app.get("/connectors/{broker}/stream/status", response_model=StreamStatusResponse)
+def stream_status(broker: str, account_id: str = "default") -> StreamStatusResponse:
+    """Which websocket market-data streams (if any) this connector has open."""
+    _require_known_broker(broker)
+    connector = registry.get(broker, account_id)
+    streams = list(getattr(connector, "active_streams", []) or []) if connector else []
+    return StreamStatusResponse(
+        broker=broker,
+        account_id=account_id,
+        connected=bool(connector and connector.is_connected()),
+        streaming=bool(streams),
+        streams=streams,
+    )
 
 
 @app.post("/connectors/{broker}/orders", response_model=ExecutionReport)
