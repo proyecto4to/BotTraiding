@@ -106,6 +106,8 @@ services:
       BACKTESTER_URL: http://backtester:8000
       AI_ENGINE_URL: http://ai-engine:8000
       EXECUTION_ENGINE_URL: http://execution-engine:8000
+      TRADING_ENGINE_URL: http://trading-engine:8000
+      NOTIFICATION_SERVICE_URL: http://notification-service:8000
       RATE_LIMIT_CAPACITY: ${RATE_LIMIT_CAPACITY:-60}
       RATE_LIMIT_REFILL_PER_SECOND: ${RATE_LIMIT_REFILL_PER_SECOND:-1.0}
       PROXY_TIMEOUT_SECONDS: ${PROXY_TIMEOUT_SECONDS:-30}

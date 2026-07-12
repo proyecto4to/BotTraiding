@@ -1,79 +1,120 @@
+﻿# Arranque local completo de BotTrading (sin Docker).
+# Levanta los 14 servicios Python (cada uno con su .venv) + frontend Next.js.
+# Datos: SQLite por servicio en .local/ (en Docker se usa Postgres+Alembic).
+# Uso:  powershell -File scripts\start-bottrading.ps1
+# Para reiniciar todo:  scripts\stop-bottrading.ps1  y luego este script.
+
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = 'C:\Users\Dell Vostro\OneDrive\Documentos\GitHub\BotTraiding'
-$frontendDir = Join-Path $repoRoot 'frontend'
-$gatewayDir = Join-Path $repoRoot 'services/gateway'
-$authDir = Join-Path $repoRoot 'services/auth-service'
 $logsDir = Join-Path $repoRoot 'logs'
-$pythonExe = 'C:\Users\Dell Vostro\AppData\Local\Programs\Python\Python313\python.exe'
+$localDir = Join-Path $repoRoot '.local'
+$globalPython = 'C:\Users\Dell Vostro\AppData\Local\Programs\Python\Python313\python.exe'
 $npmExe = 'C:\Program Files\nodejs\npm.cmd'
 
-if (-not (Test-Path $logsDir)) {
-    New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+foreach ($d in @($logsDir, $localDir)) {
+    if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
 
-$env:PYTHONPATH = Join-Path $repoRoot 'services'
+# --- Entorno comun -----------------------------------------------------------
 $env:Path = "C:\Program Files\nodejs;$env:Path"
-$env:AUTH_SERVICE_URL = 'http://127.0.0.1:8001'
-# Auth firma con este valor por defecto; el gateway NECESITA la variable
-# definida para verificar tokens (trading_contracts/auth.py no tiene default).
+# Auth firma con este valor por defecto; el gateway y demas servicios NECESITAN
+# la variable definida para verificar tokens.
 if (-not $env:JWT_SECRET) { $env:JWT_SECRET = 'dev-insecure-secret-change-me' }
 $env:CORS_ORIGINS = 'http://localhost:3000,http://127.0.0.1:3000'
+$env:EXECUTION_MODE = 'paper'
 
-function Test-PortOpen([string]$Server, [int]$Port) {
+# URLs entre servicios (mismo mapa de puertos que docker-compose)
+$env:AUTH_SERVICE_URL       = 'http://127.0.0.1:8001'
+$env:STRATEGY_ENGINE_URL    = 'http://127.0.0.1:8002'
+$env:RISK_ENGINE_URL        = 'http://127.0.0.1:8003'
+$env:PORTFOLIO_ENGINE_URL   = 'http://127.0.0.1:8004'
+$env:AI_ENGINE_URL          = 'http://127.0.0.1:8005'
+$env:EXECUTION_ENGINE_URL   = 'http://127.0.0.1:8006'
+$env:BROKER_CONNECTORS_URL  = 'http://127.0.0.1:8007'
+$env:BACKTESTER_URL         = 'http://127.0.0.1:8008'
+$env:OPTIMIZER_URL          = 'http://127.0.0.1:8009'
+$env:PAPER_TRADING_URL      = 'http://127.0.0.1:8010'
+$env:NOTIFICATION_SERVICE_URL = 'http://127.0.0.1:8011'
+$env:TRADING_ENGINE_URL     = 'http://127.0.0.1:8013'
+
+# name, port
+$services = @(
+    @('gateway',              8000),
+    @('auth-service',         8001),
+    @('strategy-engine',      8002),
+    @('risk-engine',          8003),
+    @('portfolio-engine',     8004),
+    @('ai-engine',            8005),
+    @('execution-engine',     8006),
+    @('broker-connectors',    8007),
+    @('backtester',           8008),
+    @('optimizer',            8009),
+    @('paper-trading',        8010),
+    @('notification-service', 8011),
+    @('scheduler',            8012),
+    @('trading-engine',       8013)
+)
+
+function Test-PortOpen([int]$Port) {
     try {
-        $request = [System.Net.Sockets.TcpClient]::new()
-        $request.Connect($Server, $Port)
-        $request.Close()
-        return $true
+        $c = [System.Net.Sockets.TcpClient]::new()
+        $c.Connect('127.0.0.1', $Port); $c.Close(); return $true
+    } catch { return $false }
+}
+
+foreach ($svc in $services) {
+    $name = $svc[0]; $port = $svc[1]
+    if (Test-PortOpen -Port $port) { Write-Host "$name ya corre en :$port"; continue }
+
+    $svcDir = Join-Path $repoRoot "services\$name"
+    $venvPython = Join-Path $svcDir '.venv\Scripts\python.exe'
+    $python = if (Test-Path $venvPython) { $venvPython } else { $globalPython }
+
+    # SQLite propio por servicio (solo desarrollo local; Docker usa Postgres)
+    if (Test-Path (Join-Path $svcDir 'app\models.py')) {
+        $dbFile = (Join-Path $localDir "$name.db") -replace '\\', '/'
+        $env:DATABASE_URL = "sqlite:///$dbFile"
+        # Crear tablas si faltan (las migraciones Alembic usan tipos Postgres,
+        # asi que localmente se usa create_all sobre los modelos).
+        & $python -c "import sys; sys.path.insert(0, r'$svcDir'); from app.db import engine; import app.models as m; m.Base.metadata.create_all(bind=engine)" 2>$null
+        if ($LASTEXITCODE -ne 0) { Write-Warning "$name : fallo create_all (endpoints de DB pueden dar 500)" }
+    } else {
+        Remove-Item Env:\DATABASE_URL -ErrorAction SilentlyContinue
     }
-    catch {
-        return $false
-    }
+
+    $out = Join-Path $logsDir "$name.log"
+    $errLog = Join-Path $logsDir "$name.err.log"
+    Start-Process -FilePath $python -WorkingDirectory $svcDir `
+        -ArgumentList "-m uvicorn app.main:app --host 0.0.0.0 --port $port" `
+        -RedirectStandardOutput $out -RedirectStandardError $errLog -NoNewWindow | Out-Null
+    Write-Host "Iniciado $name en :$port"
 }
+Remove-Item Env:\DATABASE_URL -ErrorAction SilentlyContinue
 
-function Start-ServiceIfNeeded([string]$Name, [string]$WorkingDir, [string]$LogFile, [string[]]$Args) {
-    $portArg = $Args[-1]
-    $port = [int]$portArg
-    if (Test-PortOpen -Server '127.0.0.1' -Port $port) {
-        Write-Host "$Name is already running."
-        return
-    }
-
-    $stdout = Join-Path $logsDir $LogFile
-    $stderr = $stdout -replace '\.log$', '.err.log'
-    $commandLine = ($Args | Where-Object { $_ -ne $null }) -join ' '
-    Start-Process -FilePath $pythonExe -WorkingDirectory $WorkingDir -ArgumentList $commandLine -RedirectStandardOutput $stdout -RedirectStandardError $stderr -NoNewWindow | Out-Null
-    Write-Host "Started $Name."
-}
-
-if (-not (Test-PortOpen -Server '127.0.0.1' -Port 8000)) {
-    Start-ServiceIfNeeded -Name 'Gateway' -WorkingDir $gatewayDir -LogFile 'gateway.log' -Args @('-m','uvicorn','app.main:app','--host','0.0.0.0','--port','8000')
-}
-
-if (-not (Test-PortOpen -Server '127.0.0.1' -Port 8001)) {
-    Start-ServiceIfNeeded -Name 'Auth Service' -WorkingDir $authDir -LogFile 'auth-service.log' -Args @('-m','uvicorn','app.main:app','--host','0.0.0.0','--port','8001')
-}
-
+# --- Frontend ----------------------------------------------------------------
+$frontendDir = Join-Path $repoRoot 'frontend'
 if (-not (Test-Path (Join-Path $frontendDir 'node_modules'))) {
-    Write-Host 'Installing frontend dependencies...'
+    Write-Host 'Instalando dependencias del frontend...'
     & $npmExe install --prefix $frontendDir
 }
+if (-not (Test-PortOpen -Port 3000)) {
+    Start-Process -FilePath $npmExe -WorkingDirectory $frontendDir -ArgumentList 'run dev' `
+        -RedirectStandardOutput (Join-Path $logsDir 'frontend.log') `
+        -RedirectStandardError (Join-Path $logsDir 'frontend.err.log') -NoNewWindow | Out-Null
+    Write-Host 'Frontend iniciado.'
+} else { Write-Host 'Frontend ya corre en :3000' }
 
-if (-not (Test-PortOpen -Server '127.0.0.1' -Port 3000)) {
-    Start-Process -FilePath $npmExe -WorkingDirectory $frontendDir -ArgumentList 'run dev' -RedirectStandardOutput (Join-Path $logsDir 'frontend.log') -RedirectStandardError (Join-Path $logsDir 'frontend.err.log') -NoNewWindow | Out-Null
-    Write-Host 'Started frontend.'
+# --- Espera y verificacion ----------------------------------------------------
+Write-Host "`nEsperando servicios..."
+Start-Sleep -Seconds 8
+$down = @()
+foreach ($svc in $services) {
+    if (-not (Test-PortOpen -Port $svc[1])) { $down += "$($svc[0]) (:$($svc[1]))" }
 }
-else {
-    Write-Host 'Frontend already running.'
+if ($down.Count -gt 0) {
+    Write-Warning ("Sin responder: " + ($down -join ', ') + " - revisa logs\<servicio>.err.log")
+} else {
+    Write-Host 'Los 14 servicios responden.' -ForegroundColor Green
 }
-
-for ($i = 0; $i -lt 20; $i++) {
-    if ((Test-PortOpen -Server '127.0.0.1' -Port 3000) -and (Test-PortOpen -Server '127.0.0.1' -Port 8000) -and (Test-PortOpen -Server '127.0.0.1' -Port 8001)) {
-        break
-    }
-    Start-Sleep -Seconds 1
-}
-
-Start-Process 'http://localhost:3000'
-Write-Host 'BotTrading is ready at http://localhost:3000'
+Write-Host 'BotTrading: http://localhost:3000  |  API: http://localhost:8000'

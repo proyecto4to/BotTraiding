@@ -39,6 +39,11 @@ UPSTREAMS: dict[str, tuple[str, str, str]] = {
     "backtests": ("BACKTESTER_URL", "http://backtester:8000", "backtests"),
     "ai": ("AI_ENGINE_URL", "http://ai-engine:8000", "ai"),
     "executions": ("EXECUTION_ENGINE_URL", "http://execution-engine:8000", "executions"),
+    "bots": ("TRADING_ENGINE_URL", "http://trading-engine:8000", "bots"),
+    # notification-service serves /notifications/* and /preferences/* at its
+    # root, so like "brokers" this segment forwards without a prefix
+    # (the frontend calls /api/notify/notifications, /api/notify/preferences/...).
+    "notify": ("NOTIFICATION_SERVICE_URL", "http://notification-service:8000", ""),
 }
 
 # Exact-path aliases: (segment, rest-without-trailing-slash) -> upstream path.
