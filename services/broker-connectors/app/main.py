@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
@@ -28,7 +28,13 @@ from .connectors.errors import (
     UnsupportedTimeframeError,
 )
 from .connectors.http_base import BrokerConfig
-from .credential_store import BrokerCredentials, InMemoryCredentialStore
+from .credential_store import (
+    BrokerCredentials,
+    CredentialKeyError,
+    EncryptedDbCredentialStore,
+    build_credential_store,
+)
+from .deps import require_admin
 from .registry import CONNECTOR_CLASSES, registry
 
 SERVICE_NAME = "broker-connectors"
@@ -46,9 +52,10 @@ if not getattr(app.state, "metrics_instrumented", False):
     ).instrument(app).expose(app, include_in_schema=False)
     app.state.metrics_instrumented = True
 
-# Fase 3: in-memory credential store. Swap for a Vault/KMS-backed
-# CredentialStore implementation later without touching the endpoints below.
-credential_store = InMemoryCredentialStore()
+# Credential store selected by CREDENTIAL_STORE (default in-memory; "db"
+# uses Fernet-encrypted rows and requires BROKER_CRED_KEY). Secrets are never
+# returned or logged regardless of backend (see BrokerCredentials.__repr__).
+credential_store = build_credential_store()
 
 
 class ConnectRequest(BaseModel):
@@ -147,6 +154,35 @@ def ready() -> dict:
 def list_connectors() -> dict:
     """List brokers with a registered connector implementation."""
     return {"brokers": registry.available_brokers()}
+
+
+class RotateKeyRequest(BaseModel):
+    new_key: str
+
+
+class RotateKeyResponse(BaseModel):
+    rotated: int
+
+
+@app.post("/connectors/credentials/rotate", response_model=RotateKeyResponse)
+def rotate_credentials(
+    body: RotateKeyRequest, _admin=Depends(require_admin)
+) -> RotateKeyResponse:
+    """Re-encrypt all stored broker credentials under a new key (admin only).
+
+    Operational action: provide a freshly generated Fernet key; every row is
+    re-encrypted and the old key can no longer decrypt them. Only valid with
+    CREDENTIAL_STORE=db."""
+    if not isinstance(credential_store, EncryptedDbCredentialStore):
+        raise HTTPException(
+            status_code=400,
+            detail="credential rotation requires CREDENTIAL_STORE=db",
+        )
+    try:
+        rotated = credential_store.rotate(body.new_key)
+    except CredentialKeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RotateKeyResponse(rotated=rotated)
 
 
 @app.post("/connectors/{broker}/connect", response_model=ConnectResponse)

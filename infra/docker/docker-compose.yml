@@ -286,6 +286,11 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
       NATS_URL: nats://nats:4222
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in infra/docker/.env, see .env.example}
+      # memory (default) = Fase 3 in-memory store; db = Fernet-encrypted rows
+      # (requires BROKER_CRED_KEY). Rotate keys via POST /connectors/credentials/rotate.
+      CREDENTIAL_STORE: ${CREDENTIAL_STORE:-memory}
+      BROKER_CRED_KEY: ${BROKER_CRED_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
