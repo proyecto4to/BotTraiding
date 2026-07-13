@@ -137,6 +137,7 @@ def create_bot(
         timeframe=body.timeframe,
         strategy_keys=body.strategy_keys,
         params_overrides=body.params_overrides,
+        risk_allocation=body.risk_allocation,
         cycle_interval_seconds=body.cycle_interval_seconds,
         status=BOT_STATUS_STOPPED,
         created_by=token.sub,

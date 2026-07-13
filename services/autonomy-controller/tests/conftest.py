@@ -90,6 +90,8 @@ class FakeTrading:
         self.started: list[str] = []
         self.stopped: list[str] = []
         self.created: list[str] = []
+        self.specs: list[dict] = []
+        self.updated: list[tuple[str, dict]] = []
         self.fail_list = False
 
     async def list_bots(self, account_id):
@@ -99,10 +101,24 @@ class FakeTrading:
 
     async def create_bot(self, spec):
         self._id += 1
-        bot = {"id": f"bot-{self._id}", "name": spec["name"], "status": "stopped"}
+        bot = {
+            "id": f"bot-{self._id}",
+            "name": spec["name"],
+            "status": "stopped",
+            "risk_allocation": spec.get("risk_allocation"),
+        }
         self.bots.append(bot)
         self.created.append(spec["name"])
+        self.specs.append(spec)
         return bot
+
+    async def update_bot(self, bot_id, patch):
+        self.updated.append((bot_id, patch))
+        for b in self.bots:
+            if b["id"] == bot_id:
+                b.update(patch)
+                return dict(b)
+        return {}
 
     async def start_bot(self, bot_id):
         self.started.append(bot_id)

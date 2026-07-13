@@ -34,7 +34,14 @@ interface Decision {
   state: string;
   summary: string;
   regime: Record<string, { trend?: string; volatility?: string; confidence?: number }>;
-  selection: { symbol: string; strategy_key: string; weight: number; category?: string }[];
+  selection: {
+    symbol: string;
+    strategy_key: string;
+    weight: number;
+    category?: string;
+    capital_fraction?: number;
+    risk_per_trade?: number;
+  }[];
   actions: { action: string; bot: string }[];
   errors: unknown[];
 }
@@ -173,7 +180,10 @@ export default function AutonomyPage() {
             <div className="card table-wrap">
               <table className="table">
                 <thead>
-                  <tr><th>Symbol</th><th>Strategy</th><th>Category</th><th>Weight</th></tr>
+                  <tr>
+                    <th>Symbol</th><th>Strategy</th><th>Category</th>
+                    <th>Weight</th><th>Capital</th><th>Risk/trade</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {latest.selection.map((s, i) => (
@@ -182,6 +192,8 @@ export default function AutonomyPage() {
                       <td style={{ fontFamily: "var(--mono)" }}>{s.strategy_key}</td>
                       <td>{s.category ?? "—"}</td>
                       <td>{(s.weight * 100).toFixed(0)}%</td>
+                      <td>{s.capital_fraction != null ? `${(s.capital_fraction * 100).toFixed(0)}%` : "—"}</td>
+                      <td>{s.risk_per_trade != null ? `${(s.risk_per_trade * 100).toFixed(2)}%` : "—"}</td>
                     </tr>
                   ))}
                 </tbody>

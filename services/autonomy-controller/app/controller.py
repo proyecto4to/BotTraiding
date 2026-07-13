@@ -22,7 +22,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import config, events, statemachine
+from . import allocation, config, events, statemachine
 from .clients import Clients, DownstreamError
 from .models import AutonomyDecisionRow
 from .schemas import TickResult
@@ -134,8 +134,9 @@ async def _reconcile(clients: Clients, selection: list, errors: list) -> list:
     }
     desired = {_bot_name(s["symbol"], s["strategy_key"]): s for s in selection}
 
-    # Create/start desired bots.
+    # Create/start/rebalance desired bots.
     for name, sel in desired.items():
+        alloc = allocation.allocation_of(sel)
         try:
             existing = auto_bots.get(name)
             if existing is None:
@@ -149,11 +150,19 @@ async def _reconcile(clients: Clients, selection: list, errors: list) -> list:
                         "timeframe": config.timeframe(),
                         "strategy_keys": [sel["strategy_key"]],
                         "params_overrides": {},
+                        "risk_allocation": alloc,
                         "cycle_interval_seconds": config.bot_cycle_interval(),
                     }
                 )
                 await clients.trading.start_bot(created["id"])
-                actions.append({"action": "create+start", "bot": name})
+                actions.append({"action": "create+start", "bot": name, "allocation": alloc})
+            elif allocation.allocation_changed(existing.get("risk_allocation"), alloc):
+                # Weight shift: rebalance capital (config changes need the bot
+                # stopped first, then restart).
+                await clients.trading.stop_bot(existing["id"])
+                await clients.trading.update_bot(existing["id"], {"risk_allocation": alloc})
+                await clients.trading.start_bot(existing["id"])
+                actions.append({"action": "rebalance", "bot": name, "allocation": alloc})
             elif existing.get("status") != "running":
                 await clients.trading.start_bot(existing["id"])
                 actions.append({"action": "start", "bot": name})
@@ -219,6 +228,8 @@ async def run_cycle(db: Session, clients: Clients) -> TickResult:
         )
 
     selection, regime_summary = await _build_selection(clients, errors)
+    # Capital allocation (P7): enrich each pick with its share of the budget.
+    selection = allocation.build_allocation_plan(selection)
     actions = await _reconcile(clients, selection, errors)
 
     # First usable selection promotes LEARNING -> TRADING_PAPER.

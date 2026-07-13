@@ -107,6 +107,13 @@ class TradingEngineClient:
         resp = await _request(self._client, "POST", url, json=spec, headers=self._headers())
         return resp.json()
 
+    async def update_bot(self, bot_id: str, patch: dict) -> dict:
+        url = f"{config.trading_engine_url()}/bots/{bot_id}"
+        resp = await _request(
+            self._client, "PATCH", url, json=patch, headers=self._headers()
+        )
+        return resp.json()
+
     async def start_bot(self, bot_id: str) -> None:
         url = f"{config.trading_engine_url()}/bots/{bot_id}/start"
         await _request(self._client, "POST", url, headers=self._headers())

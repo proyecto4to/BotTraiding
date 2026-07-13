@@ -42,6 +42,24 @@ def test_create_rejects_bad_timeframe(client, trader_headers):
     assert client.post("/bots", json=payload, headers=trader_headers).status_code == 422
 
 
+def test_risk_allocation_round_trips(client, trader_headers):
+    """The autonomy controller's capital allocation (P7) persists on the bot."""
+    alloc = {"capital_fraction": 0.6, "risk_per_trade": 0.006}
+    payload = make_bot_payload()
+    payload["risk_allocation"] = alloc
+    created = client.post("/bots", json=payload, headers=trader_headers)
+    assert created.status_code == 201
+    bot_id = created.json()["id"]
+    assert created.json()["risk_allocation"] == alloc
+
+    fetched = client.get(f"/bots/{bot_id}").json()
+    assert fetched["risk_allocation"] == alloc
+
+    # A bot created without it defaults to null.
+    plain = create_bot(client, trader_headers, account_id="acct-noalloc")
+    assert plain["risk_allocation"] is None
+
+
 # --- read -----------------------------------------------------------------------
 
 

@@ -43,6 +43,11 @@ class BotBase(BaseModel):
         default_factory=dict,
         description="Per-strategy parameter overrides, keyed by strategy key.",
     )
+    risk_allocation: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Capital/risk allocation set by the autonomy controller "
+        "(e.g. {'capital_fraction': 0.6, 'risk_per_trade': 0.006}).",
+    )
     cycle_interval_seconds: float = Field(default=60.0, gt=0.0)
 
     @field_validator("timeframe")
@@ -70,6 +75,7 @@ class BotUpdate(BaseModel):
     timeframe: Optional[str] = None
     strategy_keys: Optional[list[str]] = Field(default=None, min_length=1)
     params_overrides: Optional[dict[str, dict[str, Any]]] = None
+    risk_allocation: Optional[dict[str, Any]] = None
     cycle_interval_seconds: Optional[float] = Field(default=None, ge=1.0)
 
     @field_validator("timeframe")

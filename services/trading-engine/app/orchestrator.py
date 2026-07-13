@@ -89,6 +89,7 @@ def bot_to_spec(row: BotRow) -> BotOut:
         timeframe=row.timeframe,
         strategy_keys=list(row.strategy_keys or []),
         params_overrides=dict(row.params_overrides or {}),
+        risk_allocation=row.risk_allocation,
         cycle_interval_seconds=row.cycle_interval_seconds,
         status=row.status,
         status_reason=row.status_reason,

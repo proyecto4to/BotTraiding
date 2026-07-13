@@ -99,6 +99,30 @@ def max_daily_loss_fraction() -> float:
     return float(os.environ.get("AUTONOMY_MAX_DAILY_LOSS", "0"))
 
 
+# --- capital allocation (P7) -------------------------------------------------
+def deployable_fraction() -> float:
+    """Fraction of the account budget the automation may deploy across all
+    selected strategies (the rest stays as a reserve). Default 100%."""
+    return float(os.environ.get("AUTONOMY_DEPLOYABLE_FRACTION", "1.0"))
+
+
+def base_risk_per_trade() -> float:
+    """Total per-trade risk budget (fraction of equity) distributed across the
+    selected strategies by AI weight. Default 1%."""
+    return float(os.environ.get("AUTONOMY_BASE_RISK_PER_TRADE", "0.01"))
+
+
+def max_exposure_per_symbol() -> float:
+    """Cap on any single (symbol, strategy) capital share. Default 50%."""
+    return float(os.environ.get("AUTONOMY_MAX_EXPOSURE_PER_SYMBOL", "0.5"))
+
+
+def rebalance_threshold() -> float:
+    """Relative change in a bot's risk_per_trade that triggers a rebalance
+    (stop -> patch -> start). Default 10%; avoids churn on tiny weight drift."""
+    return float(os.environ.get("AUTONOMY_REBALANCE_THRESHOLD", "0.1"))
+
+
 # Bots the controller manages carry this name prefix so it only ever
 # creates/stops its own bots, never a human-created one.
 BOT_NAME_PREFIX = "auto:"

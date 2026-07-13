@@ -38,6 +38,10 @@ class BotRow(Base):
     timeframe: Mapped[str] = mapped_column(String(10), nullable=False)
     strategy_keys: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     params_overrides: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Capital/risk allocation for this bot (P7): e.g.
+    # {"capital_fraction": 0.6, "risk_per_trade": 0.006}. Set by the autonomy
+    # controller from the AI weights; null for manually-created bots.
+    risk_allocation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     cycle_interval_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=60.0)
     status: Mapped[str] = mapped_column(String(10), nullable=False, default="stopped")
     status_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
