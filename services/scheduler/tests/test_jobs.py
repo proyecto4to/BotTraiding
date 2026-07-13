@@ -11,13 +11,16 @@ from app.config import default_jobs, load_jobs
 from app.runtime import cron_trigger, next_run_time, runtime
 
 
-def test_default_registry_has_the_three_periodic_jobs() -> None:
+def test_default_registry_has_the_periodic_jobs() -> None:
     jobs = default_jobs()
     by_id = {j.id: j for j in jobs}
-    assert set(by_id) == {"reoptimize-weekly", "regime-refresh-hourly", "health-ping"}
+    assert set(by_id) == {
+        "reoptimize-weekly", "regime-refresh-hourly", "health-ping", "autonomy-tick"
+    }
     assert by_id["reoptimize-weekly"].type == "reoptimize"
     assert by_id["reoptimize-weekly"].cron == "0 3 * * 1"  # weekly
     assert by_id["regime-refresh-hourly"].cron == "0 * * * *"  # hourly
+    assert by_id["autonomy-tick"].type == "autonomy_tick"
     assert all(j.enabled for j in jobs)
 
 
@@ -101,7 +104,7 @@ def test_jobs_endpoint_lists_registry_with_next_runs(client) -> None:
     assert resp.status_code == 200
     jobs = resp.json()
     assert {j["id"] for j in jobs} == {
-        "reoptimize-weekly", "regime-refresh-hourly", "health-ping",
+        "reoptimize-weekly", "regime-refresh-hourly", "health-ping", "autonomy-tick",
     }
     for job in jobs:
         assert job["enabled"] is True
@@ -122,5 +125,5 @@ def test_jobs_endpoint_reflects_env_config(client, monkeypatch) -> None:
 def test_ready_reports_registry(client) -> None:
     body = client.get("/ready").json()
     assert body["status"] == "ready"
-    assert body["jobs_loaded"] == 3
+    assert body["jobs_loaded"] == 4
     assert body["clock_running"] is False  # SCHEDULER_AUTOSTART=false in tests

@@ -29,6 +29,7 @@ jobs:
           - scheduler
           - trading-engine
           - market-data
+          - autonomy-controller
     steps:
       - uses: actions/checkout@v4
 
@@ -102,6 +103,7 @@ jobs:
           - scheduler
           - trading-engine
           - market-data
+          - autonomy-controller
     steps:
       - uses: actions/checkout@v4
 

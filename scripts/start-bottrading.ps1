@@ -45,6 +45,7 @@ $env:PAPER_TRADING_URL      = 'http://127.0.0.1:8010'
 $env:NOTIFICATION_SERVICE_URL = 'http://127.0.0.1:8011'
 $env:TRADING_ENGINE_URL     = 'http://127.0.0.1:8013'
 $env:MARKET_DATA_URL        = 'http://127.0.0.1:8014'
+$env:AUTONOMY_URL           = 'http://127.0.0.1:8015'
 
 # name, port
 $services = @(
@@ -62,7 +63,8 @@ $services = @(
     @('notification-service', 8011),
     @('scheduler',            8012),
     @('trading-engine',       8013),
-    @('market-data',          8014)
+    @('market-data',          8014),
+    @('autonomy-controller',  8015)
 )
 
 function Test-PortOpen([int]$Port) {

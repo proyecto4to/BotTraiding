@@ -24,4 +24,5 @@ resources:
   - scheduler.yaml
   - trading-engine.yaml
   - market-data.yaml
+  - autonomy-controller.yaml
   - hpa.yaml

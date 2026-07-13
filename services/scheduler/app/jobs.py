@@ -61,10 +61,18 @@ async def run_health_ping(job: JobDefinition) -> dict[str, Any]:
     return {"statuses": statuses, "down": down}
 
 
+async def run_autonomy_tick(job: JobDefinition) -> dict[str, Any]:
+    """Drive one autonomy cycle. A no-op when the master switch is off, so it
+    is safe to schedule frequently; it becomes active the moment the operator
+    enables automation."""
+    return {"tick": await clients.get_autonomy().tick()}
+
+
 JOB_HANDLERS: dict[str, JobHandler] = {
     "reoptimize": run_reoptimize,
     "regime_refresh": run_regime_refresh,
     "health_ping": run_health_ping,
+    "autonomy_tick": run_autonomy_tick,
 }
 
 

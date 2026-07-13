@@ -109,6 +109,7 @@ services:
       TRADING_ENGINE_URL: http://trading-engine:8000
       NOTIFICATION_SERVICE_URL: http://notification-service:8000
       MARKET_DATA_URL: http://market-data:8000
+      AUTONOMY_URL: http://autonomy-controller:8000
       RATE_LIMIT_CAPACITY: ${RATE_LIMIT_CAPACITY:-60}
       RATE_LIMIT_REFILL_PER_SECOND: ${RATE_LIMIT_REFILL_PER_SECOND:-1.0}
       PROXY_TIMEOUT_SECONDS: ${PROXY_TIMEOUT_SECONDS:-30}
@@ -305,6 +306,38 @@ services:
       nats:
         condition: service_started
 
+  autonomy-controller:
+    build:
+      context: ../..
+      dockerfile: services/autonomy-controller/Dockerfile
+    ports:
+      - "8015:8000"
+    environment:
+      SERVICE_NAME: autonomy-controller
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
+      NATS_URL: nats://nats:4222
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in infra/docker/.env, see .env.example}
+      AI_ENGINE_URL: http://ai-engine:8000
+      MARKET_DATA_URL: http://market-data:8000
+      TRADING_ENGINE_URL: http://trading-engine:8000
+      PORTFOLIO_ENGINE_URL: http://portfolio-engine:8000
+      AUTONOMY_SYMBOLS: ${AUTONOMY_SYMBOLS:-BTCUSDT}
+      AUTONOMY_TIMEFRAME: ${AUTONOMY_TIMEFRAME:-1h}
+      AUTONOMY_MARKET: ${AUTONOMY_MARKET:-crypto}
+      AUTONOMY_BROKER: ${AUTONOMY_BROKER:-binance}
+      AUTONOMY_ACCOUNT_ID: ${AUTONOMY_ACCOUNT_ID:-autonomy}
+      AUTONOMY_TOP_N: ${AUTONOMY_TOP_N:-1}
+      AUTONOMY_MAX_ACTIVE_BOTS: ${AUTONOMY_MAX_ACTIVE_BOTS:-5}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-engine:
+        condition: service_started
+      market-data:
+        condition: service_started
+      trading-engine:
+        condition: service_started
+
   market-data:
     build:
       context: ../..
@@ -448,6 +481,7 @@ services:
       STRATEGY_ENGINE_URL: http://strategy-engine:8000
       OPTIMIZER_URL: http://optimizer:8000
       AI_ENGINE_URL: http://ai-engine:8000
+      AUTONOMY_URL: http://autonomy-controller:8000
       # Defaults to pinging the three services above; override to add more,
       # e.g. "gateway=http://gateway:8000,risk-engine=http://risk-engine:8000"
       HEALTH_PING_URLS: ${HEALTH_PING_URLS:-}

@@ -1,0 +1,61 @@
+# P4: autonomy-controller — the self-driving brain behind the master switch.
+# Single-instance by design (one control loop / one state machine); NOT in
+# hpa.yaml. State lives in Postgres so a restart resumes cleanly.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autonomy-controller
+  namespace: tradingplatform
+  labels:
+    app: autonomy-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: autonomy-controller
+  template:
+    metadata:
+      labels:
+        app: autonomy-controller
+    spec:
+      containers:
+        - name: autonomy-controller
+          image: tradingplatform/autonomy-controller:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          envFrom:
+            - configMapRef:
+                name: tradingplatform-env
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: autonomy-controller
+  namespace: tradingplatform
+  labels:
+    app: autonomy-controller
+spec:
+  selector:
+    app: autonomy-controller
+  ports:
+    - port: 8000
+      targetPort: 8000

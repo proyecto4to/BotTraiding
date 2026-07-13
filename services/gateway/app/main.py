@@ -13,24 +13,21 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import httpx
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app import market_config, proxy
 from app.audit import AuditMiddleware
-
-
-class AutomationState:
-    def __init__(self) -> None:
-        self.enabled = False
-        self.mode = "manual"
-        self.recommendation = "Waiting for market data and recent performance."
-
-
-AUTOMATION_STATE = AutomationState()
+from app.deps import get_token_payload, require_admin
 
 SERVICE_NAME = "gateway"
+
+# The master switch proxies to the autonomy-controller. The controller already
+# returns {state, enabled, mode, recommendation}; the dashboard consumes
+# {enabled, mode, recommendation}.
+AUTONOMY_URL = os.environ.get("AUTONOMY_URL", "http://autonomy-controller:8000").rstrip("/")
 
 
 @asynccontextmanager
@@ -60,7 +57,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(market_config.router)
-app.include_router(proxy.router)
+# proxy.router (the /api/{segment} catch-all) is included LAST, at the end of
+# this module, so specific gateway-owned routes like /api/automation/* are
+# matched before the catch-all forwards them to an upstream.
 
 # Fase 14 (Monitoreo): default HTTP metrics (request count/latency/errors,
 # in-progress gauge) exposed on /metrics for Prometheus. Guarded so repeated
@@ -86,22 +85,53 @@ def ready() -> dict:
     return {"status": "ready", "service": SERVICE_NAME}
 
 
-@app.get("/api/automation/state")
-def automation_state() -> dict:
+def _automation_view(payload: dict) -> dict:
+    """Project the controller's state onto the shape the dashboard reads."""
     return {
-        "enabled": AUTOMATION_STATE.enabled,
-        "mode": AUTOMATION_STATE.mode,
-        "recommendation": AUTOMATION_STATE.recommendation,
+        "enabled": bool(payload.get("enabled", False)),
+        "mode": payload.get("mode", "unknown"),
+        "recommendation": payload.get("recommendation", ""),
     }
 
 
+_AUTONOMY_DOWN = {
+    "enabled": False,
+    "mode": "unavailable",
+    "recommendation": "Autonomy controller unavailable.",
+}
+
+
+@app.get("/api/automation/state")
+async def automation_state(_user=Depends(get_token_payload)) -> dict:
+    """Current master-switch state (any authenticated user can view)."""
+    client = await proxy.get_http_client()
+    try:
+        resp = await client.get(f"{AUTONOMY_URL}/autonomy/state")
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        return _AUTONOMY_DOWN
+    return _automation_view(resp.json())
+
+
 @app.post("/api/automation/toggle")
-def toggle_automation() -> dict:
-    AUTOMATION_STATE.enabled = not AUTOMATION_STATE.enabled
-    AUTOMATION_STATE.mode = "auto" if AUTOMATION_STATE.enabled else "manual"
-    AUTOMATION_STATE.recommendation = (
-        "Automation is active. Risk controls remain enforced."
-        if AUTOMATION_STATE.enabled
-        else "Automation is paused. You can re-enable it at any time."
-    )
-    return automation_state()
+async def toggle_automation(request: Request, _admin=Depends(require_admin)) -> dict:
+    """Flip the master switch: enable when off, disable when on (admin only).
+
+    The caller's admin token is forwarded to the controller, which enforces the
+    same admin requirement."""
+    client = await proxy.get_http_client()
+    headers = {"authorization": request.headers.get("authorization", "")}
+    try:
+        current = await client.get(f"{AUTONOMY_URL}/autonomy/state")
+        current.raise_for_status()
+        action = "disable" if current.json().get("enabled") else "enable"
+        resp = await client.post(f"{AUTONOMY_URL}/autonomy/{action}", headers=headers)
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        return _AUTONOMY_DOWN
+    return _automation_view(resp.json())
+
+
+# The reverse-proxy catch-all is registered last so specific gateway routes
+# (config, automation) take precedence over /api/{segment} forwarding.
+app.include_router(proxy.router)

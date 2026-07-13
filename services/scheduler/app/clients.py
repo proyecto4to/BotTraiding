@@ -110,6 +110,24 @@ class HttpAiEngineClient(AiEngineClient):
             return resp.json()
 
 
+# --- autonomy-controller ---------------------------------------------------------
+
+
+class AutonomyClient(ABC):
+    @abstractmethod
+    async def tick(self) -> dict[str, Any]:
+        """Run one autonomy cycle (no-op when the master switch is off)."""
+
+
+class HttpAutonomyClient(AutonomyClient):
+    async def tick(self) -> dict[str, Any]:
+        base = _url("AUTONOMY_URL", "http://autonomy-controller:8000")
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.post(f"{base}/autonomy/tick")
+            resp.raise_for_status()
+            return resp.json()
+
+
 # --- health ping -------------------------------------------------------------------
 
 
@@ -155,7 +173,20 @@ def health_ping_targets() -> dict[str, str]:
 _strategy_engine: Optional[StrategyEngineClient] = None
 _optimizer: Optional[OptimizerClient] = None
 _ai_engine: Optional[AiEngineClient] = None
+_autonomy: Optional[AutonomyClient] = None
 _health: Optional[HealthClient] = None
+
+
+def get_autonomy() -> AutonomyClient:
+    global _autonomy
+    if _autonomy is None:
+        _autonomy = HttpAutonomyClient()
+    return _autonomy
+
+
+def set_autonomy(client: Optional[AutonomyClient]) -> None:
+    global _autonomy
+    _autonomy = client
 
 
 def get_strategy_engine() -> StrategyEngineClient:
