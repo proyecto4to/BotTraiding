@@ -86,6 +86,19 @@ def bot_cycle_interval() -> int:
     return int(os.environ.get("AUTONOMY_CYCLE_INTERVAL_SECONDS", "60"))
 
 
+# --- global risk guard (P9): platform-level circuit breaker ------------------
+def max_drawdown() -> float:
+    """Halt automation if aggregate drawdown reaches this fraction (0 disables).
+    Default 25%."""
+    return float(os.environ.get("AUTONOMY_MAX_DRAWDOWN", "0.25"))
+
+
+def max_daily_loss_fraction() -> float:
+    """Halt if the day's loss reaches this fraction of equity (0 disables).
+    Off by default: absolute tolerance depends on the account, so it is opt-in."""
+    return float(os.environ.get("AUTONOMY_MAX_DAILY_LOSS", "0"))
+
+
 # Bots the controller manages carry this name prefix so it only ever
 # creates/stops its own bots, never a human-created one.
 BOT_NAME_PREFIX = "auto:"

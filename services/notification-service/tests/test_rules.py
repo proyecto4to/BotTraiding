@@ -25,6 +25,9 @@ CASES = [
     ("ai.recommendation.created", {}, "info"),
     ("optimizer.promotion.recommended", {}, "info"),
     ("bot.started", {}, "info"),
+    ("autonomy.halted", {"reason": "auto-halt: drawdown"}, "critical"),
+    ("autonomy.enabled", {}, "info"),
+    ("autonomy.disabled", {}, "info"),
     ("something.unknown", {}, "info"),
 ]
 

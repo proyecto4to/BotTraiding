@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session
 
 from trading_contracts.auth import TokenPayload
 
-from . import config, controller, events, statemachine
-from .clients import Clients, DownstreamError, get_clients
+from . import controller, events, statemachine
+from .clients import Clients, get_clients
 from .db import get_db
 from .deps import require_admin
 from .schemas import DecisionOut, HaltRequest, StateOut, TickResult
@@ -50,21 +50,6 @@ if not getattr(app.state, "metrics_instrumented", False):
         excluded_handlers=["/metrics"],
     ).instrument(app).expose(app, include_in_schema=False)
     app.state.metrics_instrumented = True
-
-
-async def _stop_all_autonomy_bots(clients: Clients) -> None:
-    """Best-effort: stop every running autonomy-owned bot (used on disable/halt)."""
-    try:
-        bots = await clients.trading.list_bots(config.account_id())
-    except DownstreamError as exc:
-        logger.warning("could not list bots to stop: %s", exc)
-        return
-    for bot in bots:
-        if str(bot.get("name", "")).startswith(config.BOT_NAME_PREFIX) and bot.get("status") == "running":
-            try:
-                await clients.trading.stop_bot(bot["id"])
-            except DownstreamError as exc:
-                logger.warning("could not stop bot %s: %s", bot.get("name"), exc)
 
 
 @app.get("/health")
@@ -100,7 +85,7 @@ async def disable(
     admin: TokenPayload = Depends(require_admin),
     clients: Clients = Depends(get_clients),
 ) -> StateOut:
-    await _stop_all_autonomy_bots(clients)
+    await controller.stop_all_autonomy_bots(clients)
     row = statemachine.disable(db, actor=admin.sub)
     await events.publish_event("autonomy.disabled", {"actor": admin.sub})
     return StateOut(**statemachine.presentation(row))
@@ -115,7 +100,7 @@ async def halt(
 ) -> StateOut:
     """Kill switch: force HALTED and stop autonomy bots. Needs a reset to resume."""
     reason = body.reason if body else "manual kill switch"
-    await _stop_all_autonomy_bots(clients)
+    await controller.stop_all_autonomy_bots(clients)
     row = statemachine.halt(db, reason=reason, actor=admin.sub)
     await events.publish_event("autonomy.halted", {"actor": admin.sub, "reason": reason})
     return StateOut(**statemachine.presentation(row))

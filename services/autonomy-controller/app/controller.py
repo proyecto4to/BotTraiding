@@ -22,7 +22,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import config, statemachine
+from . import config, events, statemachine
 from .clients import Clients, DownstreamError
 from .models import AutonomyDecisionRow
 from .schemas import TickResult
@@ -32,6 +32,53 @@ logger = logging.getLogger("autonomy-controller.controller")
 
 def _bot_name(symbol: str, strategy_key: str) -> str:
     return f"{config.BOT_NAME_PREFIX}{symbol}:{strategy_key}"
+
+
+async def stop_all_autonomy_bots(clients: Clients) -> list[dict]:
+    """Stop every running autonomy-owned bot (used on disable/halt)."""
+    actions: list[dict] = []
+    try:
+        bots = await clients.trading.list_bots(config.account_id())
+    except DownstreamError as exc:
+        logger.warning("could not list bots to stop: %s", exc)
+        return actions
+    for bot in bots:
+        if str(bot.get("name", "")).startswith(config.BOT_NAME_PREFIX) and bot.get("status") == "running":
+            try:
+                await clients.trading.stop_bot(bot["id"])
+                actions.append({"action": "stop", "bot": bot["name"]})
+            except DownstreamError as exc:
+                logger.warning("could not stop bot %s: %s", bot.get("name"), exc)
+    return actions
+
+
+async def check_risk_guard(clients: Clients, errors: list) -> list[str]:
+    """Platform-level circuit breaker (P9): returns a list of breached limits.
+
+    Reads aggregate drawdown and daily PnL from portfolio-engine. A portfolio
+    outage is fail-open (recorded, not a halt) — per-order risk checks in
+    risk-engine still protect each trade; only a real, observed breach halts
+    the whole automation."""
+    max_dd = config.max_drawdown()
+    max_dl = config.max_daily_loss_fraction()
+    if max_dd <= 0 and max_dl <= 0:
+        return []  # guard disabled
+    try:
+        state = await clients.portfolio.get_state(config.account_id())
+    except DownstreamError as exc:
+        errors.append({"stage": "risk_guard", "error": str(exc)})
+        return []
+
+    drawdown = float((state.get("drawdown") or {}).get("current_drawdown", 0.0) or 0.0)
+    equity = float((state.get("account") or {}).get("equity", 0.0) or 0.0)
+    pnl_daily = float(state.get("pnl_daily", 0.0) or 0.0)
+
+    breaches: list[str] = []
+    if max_dd > 0 and drawdown >= max_dd:
+        breaches.append(f"drawdown {drawdown:.2%} >= limit {max_dd:.2%}")
+    if max_dl > 0 and equity > 0 and pnl_daily < 0 and (-pnl_daily / equity) >= max_dl:
+        breaches.append(f"daily loss {(-pnl_daily / equity):.2%} >= limit {max_dl:.2%}")
+    return breaches
 
 
 async def _build_selection(clients: Clients, errors: list) -> tuple[list, dict]:
@@ -149,6 +196,28 @@ async def run_cycle(db: Session, clients: Clients) -> TickResult:
         return TickResult(state=state, acted=False, summary=summary)
 
     errors: list[dict] = []
+
+    # Global risk guard (P9): a real breach halts the whole automation before
+    # any new bot action, stops running bots and requires an admin reset.
+    breaches = await check_risk_guard(clients, errors)
+    if breaches:
+        reason = "auto-halt: " + "; ".join(breaches)
+        statemachine.halt(db, reason=reason, actor="risk-guard")
+        actions = await stop_all_autonomy_bots(clients)
+        await events.publish_event(
+            "autonomy.halted",
+            {"reason": reason, "severity": "critical", "actor": "risk-guard"},
+        )
+        _persist(
+            db, state=statemachine.HALTED, summary=reason, regime={},
+            selection=[], actions=actions, errors=errors,
+        )
+        logger.error("AUTONOMY AUTO-HALT: %s", reason)
+        return TickResult(
+            state=statemachine.HALTED, acted=bool(actions), summary=reason,
+            actions=actions, errors=errors,
+        )
+
     selection, regime_summary = await _build_selection(clients, errors)
     actions = await _reconcile(clients, selection, errors)
 

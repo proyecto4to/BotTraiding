@@ -116,13 +116,26 @@ class TradingEngineClient:
         await _request(self._client, "POST", url, headers=self._headers())
 
 
+class PortfolioClient:
+    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+        self._client = client
+
+    async def get_state(self, account_id: str) -> dict:
+        url = f"{config.portfolio_engine_url()}/portfolio/{account_id}"
+        resp = await _request(self._client, "GET", url)
+        return resp.json()
+
+
 @dataclass
 class Clients:
     market_data: MarketDataClient
     ai: AiClient
     trading: TradingEngineClient
+    portfolio: PortfolioClient
 
 
 def get_clients() -> Clients:
     """FastAPI dependency (overridden with fakes in tests)."""
-    return Clients(MarketDataClient(), AiClient(), TradingEngineClient())
+    return Clients(
+        MarketDataClient(), AiClient(), TradingEngineClient(), PortfolioClient()
+    )

@@ -117,9 +117,28 @@ class FakeTrading:
                 b["status"] = "stopped"
 
 
+class FakePortfolio:
+    """Aggregate risk snapshot for the global risk guard (P9)."""
+
+    def __init__(self, drawdown=0.0, pnl_daily=0.0, equity=100000.0) -> None:
+        self.drawdown = drawdown
+        self.pnl_daily = pnl_daily
+        self.equity = equity
+        self.fail = False
+
+    async def get_state(self, account_id):
+        if self.fail:
+            raise DownstreamError("portfolio down")
+        return {
+            "account": {"equity": self.equity},
+            "drawdown": {"current_drawdown": self.drawdown},
+            "pnl_daily": self.pnl_daily,
+        }
+
+
 class FakeClients(Clients):
     def __init__(self) -> None:
-        super().__init__(FakeMarketData(), FakeAi(), FakeTrading())
+        super().__init__(FakeMarketData(), FakeAi(), FakeTrading(), FakePortfolio())
 
 
 @pytest.fixture()

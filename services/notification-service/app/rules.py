@@ -77,6 +77,15 @@ def _rule_recommendations(subject: str, payload: dict) -> str | None:
     return None
 
 
+def _rule_autonomy(subject: str, payload: dict) -> str | None:
+    # A platform-level auto-halt is critical; other autonomy events are info.
+    if subject == "autonomy.halted":
+        return "critical"
+    if subject.startswith("autonomy."):
+        return "info"
+    return None
+
+
 RULES: tuple[Rule, ...] = (
     _rule_circuit_breaker,
     _rule_risk_rejection,
@@ -85,6 +94,7 @@ RULES: tuple[Rule, ...] = (
     _rule_execution_report,
     _rule_execution_other,
     _rule_recommendations,
+    _rule_autonomy,
 )
 
 
@@ -126,6 +136,12 @@ def _default_title(subject: str, payload: dict) -> str:
         return "New AI recommendation"
     if subject == "optimizer.promotion.recommended":
         return "Optimizer: promotion recommended"
+    if subject == "autonomy.halted":
+        return f"Autonomy HALTED: {payload.get('reason', 'safety trigger')}"
+    if subject == "autonomy.enabled":
+        return "Automation enabled"
+    if subject == "autonomy.disabled":
+        return "Automation disabled"
     return subject
 
 

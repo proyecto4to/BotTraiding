@@ -328,6 +328,8 @@ services:
       AUTONOMY_ACCOUNT_ID: ${AUTONOMY_ACCOUNT_ID:-autonomy}
       AUTONOMY_TOP_N: ${AUTONOMY_TOP_N:-1}
       AUTONOMY_MAX_ACTIVE_BOTS: ${AUTONOMY_MAX_ACTIVE_BOTS:-5}
+      AUTONOMY_MAX_DRAWDOWN: ${AUTONOMY_MAX_DRAWDOWN:-0.25}
+      AUTONOMY_MAX_DAILY_LOSS: ${AUTONOMY_MAX_DAILY_LOSS:-0}
     depends_on:
       postgres:
         condition: service_healthy

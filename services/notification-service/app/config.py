@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_SUBJECTS = "risk.>,execution.>,ai.>,optimizer.>,bot.>"
+DEFAULT_SUBJECTS = "risk.>,execution.>,ai.>,optimizer.>,bot.>,autonomy.>"
 
 
 def nats_url() -> str | None:
