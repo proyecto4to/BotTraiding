@@ -175,12 +175,16 @@ class RiskClient(_BaseClient):
         self._raise_for_status(response)
         return response.json()
 
-    async def validate(self, signal: dict[str, Any], account_id: str) -> dict[str, Any]:
-        response = await self._request(
-            "POST",
-            "/risk/validate",
-            json={"signal": signal, "account_id": account_id},
-        )
+    async def validate(
+        self,
+        signal: dict[str, Any],
+        account_id: str,
+        risk_per_trade_override: float | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"signal": signal, "account_id": account_id}
+        if risk_per_trade_override is not None:
+            body["risk_per_trade_override"] = risk_per_trade_override
+        response = await self._request("POST", "/risk/validate", json=body)
         self._raise_for_status(response)
         return response.json()
 

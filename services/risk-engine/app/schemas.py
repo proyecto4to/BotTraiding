@@ -79,6 +79,10 @@ class ValidateRequest(BaseModel):
     signal: TradeSignal
     account_id: str
     portfolio_state: Optional[PortfolioStateIn] = None  # inline state for tests
+    #: per-caller risk-per-trade cap (e.g. an autonomy bot's allocated share).
+    #: Only ever *reduces* sizing: the effective risk is
+    #: min(override, account max_risk_per_trade).
+    risk_per_trade_override: Optional[float] = Field(default=None, ge=0.0)
 
 
 class StopPlan(BaseModel):

@@ -220,8 +220,14 @@ class FakeRisk:
             raise self.breaker_error
         return {"account_id": account_id, "state": self.breaker_state, "reason": "test"}
 
-    async def validate(self, signal, account_id):
-        self.validate_calls.append({"signal": signal, "account_id": account_id})
+    async def validate(self, signal, account_id, risk_per_trade_override=None):
+        self.validate_calls.append(
+            {
+                "signal": signal,
+                "account_id": account_id,
+                "risk_per_trade_override": risk_per_trade_override,
+            }
+        )
         if self.validate_error is not None:
             raise self.validate_error
         return make_decision(

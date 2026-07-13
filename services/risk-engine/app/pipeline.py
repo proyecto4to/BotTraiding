@@ -96,6 +96,17 @@ async def validate_signal(
     account_id = request.account_id
     limits, _ = limits_repo.load_limits(db, account_id)
 
+    # Per-caller risk allocation (P7): an autonomy bot passes its allocated
+    # risk-per-trade share. It can only *reduce* the account cap, never raise it.
+    if request.risk_per_trade_override is not None:
+        limits = limits.model_copy(
+            update={
+                "max_risk_per_trade": min(
+                    request.risk_per_trade_override, limits.max_risk_per_trade
+                )
+            }
+        )
+
     decision = _base_decision(signal, account_id)
 
     # --- portfolio state (inline bypasses the fetch) ----------------------

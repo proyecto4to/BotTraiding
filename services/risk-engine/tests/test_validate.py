@@ -15,13 +15,15 @@ from trading_contracts import Position
 ACC = "acc-1"
 
 
-def _payload(signal=None, state=None, account_id=ACC):
+def _payload(signal=None, state=None, account_id=ACC, risk_override=None):
     body = {
         "signal": (signal or make_signal()).model_dump(mode="json"),
         "account_id": account_id,
     }
     if state is not None:
         body["portfolio_state"] = state.model_dump(mode="json")
+    if risk_override is not None:
+        body["risk_per_trade_override"] = risk_override
     return body
 
 
@@ -57,6 +59,27 @@ def test_validate_approved_path(client):
     assert decision["adjusted_stop"] == pytest.approx(95.0)
     assert decision["sizing"]["size_by_risk"] == pytest.approx(200.0)
     assert _events("risk.rejected") == []
+
+
+def test_risk_override_reduces_size(client):
+    # Account risk 1% -> size 200. Bot allocated 0.5% -> size halves to 100.
+    signal = make_signal(suggested_size=100, price=100, stop_loss=95)
+    response = client.post(
+        "/risk/validate", json=_payload(signal, make_state(), risk_override=0.005)
+    )
+    decision = response.json()
+    assert decision["approved"] is True
+    assert decision["max_size_allowed"] == pytest.approx(100.0)
+
+
+def test_risk_override_cannot_exceed_account_cap(client):
+    # An override above the account max (1%) is capped, not honored.
+    signal = make_signal(suggested_size=100, price=100, stop_loss=95)
+    response = client.post(
+        "/risk/validate", json=_payload(signal, make_state(), risk_override=0.05)
+    )
+    decision = response.json()
+    assert decision["max_size_allowed"] == pytest.approx(200.0)
 
 
 def test_validate_rejects_over_daily_loss(client):

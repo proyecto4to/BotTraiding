@@ -81,6 +81,22 @@ def test_signal_approved_places_order():
     # the coordinator enriched the signal with the price risk needs
     validated = clients.risk.validate_calls[0]["signal"]
     assert validated["metadata"]["price"] == submission["market_price"]
+    # no bot allocation set -> no per-trade risk override sent
+    assert clients.risk.validate_calls[0]["risk_per_trade_override"] is None
+
+
+def test_bot_allocation_passes_risk_override():
+    """A bot's capital allocation (P7) is forwarded to risk-engine so the AI's
+    weighting actually caps this bot's per-trade risk."""
+    signal = make_signal()
+    clients = FakeClientsBundle(
+        strategy=FakeStrategy({"sma_crossover": signal}),
+        risk=FakeRisk(approved=True, max_size_allowed=3.0),
+    )
+    spec = make_spec(risk_allocation={"capital_fraction": 0.4, "risk_per_trade": 0.004})
+    run(run_cycle(spec, clients))
+
+    assert clients.risk.validate_calls[0]["risk_per_trade_override"] == 0.004
 
 
 def test_params_overrides_forwarded_per_strategy():

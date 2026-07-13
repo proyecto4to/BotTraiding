@@ -146,8 +146,14 @@ async def _process_signal(
     if market_price is not None:
         signal.setdefault("metadata", {}).setdefault("price", market_price)
 
+    # The bot's capital allocation (P7), if set, caps its per-trade risk so the
+    # AI's weighting actually scales order size (risk-engine still enforces the
+    # account limits on top).
+    risk_override = (bot.risk_allocation or {}).get("risk_per_trade")
     try:
-        decision = await clients.risk.validate(signal, bot.account_id)
+        decision = await clients.risk.validate(
+            signal, bot.account_id, risk_per_trade_override=risk_override
+        )
     except DownstreamError as exc:
         outcome.record_error(
             "risk_validate", str(exc), strategy_key=strategy_key, symbol=symbol
