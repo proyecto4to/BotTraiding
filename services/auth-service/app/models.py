@@ -38,6 +38,9 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    # Optional login identifier (the single operator logs in as a username,
+    # not an email). Unique when set.
+    username: Mapped[str | None] = mapped_column(String(150), unique=True, nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     mfa_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)

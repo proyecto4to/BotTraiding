@@ -14,7 +14,7 @@ import { useAuth } from "@/lib/auth";
 export default function LoginPage() {
   const { state, login, submitMfa, cancelMfa } = useAuth();
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
 
@@ -27,7 +27,7 @@ export default function LoginPage() {
 
   const onSubmitCredentials = async (e: FormEvent) => {
     e.preventDefault();
-    await login(email, password);
+    await login(identifier.trim(), password);
   };
 
   const onSubmitCode = async (e: FormEvent) => {
@@ -52,17 +52,17 @@ export default function LoginPage() {
         {!mfaStep ? (
           <form onSubmit={onSubmitCredentials} aria-label="Login form">
             <div className="form-row">
-              <label className="label" htmlFor="login-email">
-                Email
+              <label className="label" htmlFor="login-identifier">
+                Usuario o email
               </label>
               <input
-                id="login-email"
+                id="login-identifier"
                 className="input"
-                type="email"
-                autoComplete="email"
+                type="text"
+                autoComplete="username"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
               />
             </div>
             <div className="form-row">

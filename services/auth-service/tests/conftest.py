@@ -41,6 +41,17 @@ def _test_db():
     Base.metadata.drop_all(engine)
 
 
+@pytest.fixture(autouse=True)
+def _reset_throttle():
+    """The login throttle is a process singleton; clear it between tests so
+    failed-login counts never leak across cases."""
+    from app.throttle import throttle
+
+    throttle._failures.clear()
+    throttle._blocked_until.clear()
+    yield
+
+
 @pytest.fixture()
 def client():
     from fastapi.testclient import TestClient

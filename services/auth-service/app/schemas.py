@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 class RegisterRequest(BaseModel):
@@ -15,6 +15,7 @@ class RegisterRequest(BaseModel):
 class UserOut(BaseModel):
     id: str
     email: str
+    username: str | None = None
     is_active: bool
     mfa_enabled: bool
     roles: list[str]
@@ -23,8 +24,26 @@ class UserOut(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    """Login by email or by username (the operator uses a username).
+
+    Exactly one identifier is required; email keeps working for existing
+    email-based accounts and the current frontend.
+    """
+
+    email: EmailStr | None = None
+    username: str | None = None
     password: str
+
+    @model_validator(mode="after")
+    def _require_identifier(self) -> "LoginRequest":
+        if not self.email and not self.username:
+            raise ValueError("provide either 'email' or 'username'")
+        return self
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
 
 
 class TokenPair(BaseModel):

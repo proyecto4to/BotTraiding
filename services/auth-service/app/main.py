@@ -6,7 +6,9 @@ Responsabilidad (docs/ARCHITECTURE.md seccion 3): Usuarios, JWT, OAuth, MFA, rol
 
 from __future__ import annotations
 
+import logging
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import pyotp
@@ -21,9 +23,11 @@ from app.audit import record as audit_record
 from app.db import get_db
 from app.deps import get_current_user, require_role
 from app.models import AuditLog, OAuthAccount, RefreshToken, Role, User, UserRole
+from app.operator import bootstrap_operator
 from app.schemas import (
     AuditLogOut,
     AuditLogPage,
+    ChangePasswordRequest,
     LoginMfaRequest,
     LoginRequest,
     LoginResponse,
@@ -35,13 +39,31 @@ from app.schemas import (
     RoleAssignRequest,
     UserOut,
 )
+from app.throttle import throttle
 from trading_contracts.auth import TokenError, decode_token
 
 SERVICE_NAME = "auth-service"
 DEFAULT_ROLE = "viewer"
 VALID_ROLES = {"admin", "trader", "viewer", "auditor"}
 
-app = FastAPI(title="auth-service", version="0.2.0")
+logger = logging.getLogger(SERVICE_NAME)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Ensure the single operator account exists (OPERATOR_USERNAME/
+    # OPERATOR_PASSWORD_HASH). Never crashes startup.
+    from app.db import SessionLocal
+
+    try:
+        with SessionLocal() as session:
+            bootstrap_operator(session)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("operator bootstrap failed: %s", exc)
+    yield
+
+
+app = FastAPI(title="auth-service", version="0.3.0", lifespan=lifespan)
 
 # Fase 14 (Monitoreo): default HTTP metrics (request count/latency/errors,
 # in-progress gauge) exposed on /metrics for Prometheus. Guarded so repeated
@@ -82,6 +104,7 @@ def _user_out(user: User) -> UserOut:
     return UserOut(
         id=user.id,
         email=user.email,
+        username=user.username,
         is_active=user.is_active,
         mfa_enabled=user.mfa_enabled,
         roles=[ur.role.name for ur in user.roles],
@@ -164,16 +187,39 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
 
 @app.post("/auth/login", response_model=LoginResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> LoginResponse:
-    user = db.scalar(select(User).where(User.email == payload.email))
-    if user is None or not user.is_active or not security.verify_password(payload.password, user.password_hash or ""):
+    ip = _client_ip(request) or "unknown"
+
+    # Brute-force protection: block the IP after too many recent failures.
+    retry_after = throttle.retry_after(ip)
+    if retry_after > 0:
+        audit_record(
+            db, actor=payload.username or payload.email or "unknown",
+            action="login-blocked", metadata={"ip": ip},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts; try again later",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    if payload.username:
+        user = db.scalar(select(User).where(User.username == payload.username))
+    else:
+        user = db.scalar(select(User).where(User.email == payload.email))
+
+    if user is None or not user.is_active or not security.verify_password(
+        payload.password, user.password_hash or ""
+    ):
+        throttle.record_failure(ip)
         audit_record(
             db,
-            actor=payload.email,
+            actor=payload.username or payload.email or "unknown",
             action="login-failure",
-            metadata={"ip": _client_ip(request)},
+            metadata={"ip": ip},
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    throttle.reset(ip)
     _maybe_bootstrap_admin(db, user)
 
     if user.mfa_enabled:
@@ -189,6 +235,39 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     access, refresh = _issue_token_pair(db, user)
     audit_record(db, actor=user.id, action="login", metadata={"ip": _client_ip(request)})
     return LoginResponse(access_token=access, refresh_token=refresh)
+
+
+@app.post("/auth/change_password", response_model=UserOut)
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> UserOut:
+    """Change the authenticated user's password (verifies the current one).
+
+    On success all existing refresh tokens are revoked so other sessions must
+    re-authenticate. The plaintext password is never logged."""
+    if not security.verify_password(payload.current_password, user.password_hash or ""):
+        audit_record(
+            db, actor=user.id, action="change-password-failure",
+            reason="wrong current password", metadata={"ip": _client_ip(request)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect"
+        )
+
+    user.password_hash = security.hash_password(payload.new_password)
+    for token in db.scalars(
+        select(RefreshToken).where(
+            RefreshToken.user_id == user.id, RefreshToken.revoked == False  # noqa: E712
+        )
+    ):
+        token.revoked = True
+    db.commit()
+    db.refresh(user)
+    audit_record(db, actor=user.id, action="change-password", metadata={"ip": _client_ip(request)})
+    return _user_out(user)
 
 
 @app.post("/auth/login/mfa", response_model=LoginResponse)

@@ -23,7 +23,10 @@ MFA_PENDING_TOKEN_EXPIRE_MINUTES = int(
     os.environ.get("MFA_PENDING_TOKEN_EXPIRE_MINUTES", "5")
 )
 
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+# bcrypt is the primary scheme (the operator's OPERATOR_PASSWORD_HASH is a
+# bcrypt hash); pbkdf2_sha256 stays accepted so any previously-hashed
+# passwords still verify.
+pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:

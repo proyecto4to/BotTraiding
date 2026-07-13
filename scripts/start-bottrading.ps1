@@ -24,6 +24,10 @@ if (-not $env:JWT_SECRET) { $env:JWT_SECRET = 'dev-insecure-secret-change-me' }
 # El primer usuario que se registre con este email recibe rol admin
 # (solo si aun no existe ningun admin).
 if (-not $env:AUTH_BOOTSTRAP_ADMIN_EMAIL) { $env:AUTH_BOOTSTRAP_ADMIN_EMAIL = 'proyecto4toano@gmail.com' }
+# Operador unico del panel: BlasJon / Viruheta (hash bcrypt; cambiala desde el
+# panel > Seguridad). auth-service lo crea al arrancar si no existe.
+if (-not $env:OPERATOR_USERNAME) { $env:OPERATOR_USERNAME = 'BlasJon' }
+if (-not $env:OPERATOR_PASSWORD_HASH) { $env:OPERATOR_PASSWORD_HASH = '$2b$12$CMYf0XnhcFmiW504P68l6eBxVzJrXrJvRTmP5Mbaxkr/LNceL.1Zm' }
 $env:CORS_ORIGINS = 'http://localhost:3000,http://127.0.0.1:3000'
 $env:EXECUTION_MODE = 'paper'
 

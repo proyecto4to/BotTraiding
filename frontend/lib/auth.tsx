@@ -28,7 +28,7 @@ import type { LoginResponse, UserOut } from "@/lib/types";
 export interface AuthContextValue {
   state: AuthState;
   isAdmin: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (identifier: string, password: string) => Promise<void>;
   submitMfa: (code: string) => Promise<void>;
   cancelMfa: () => void;
   register: (email: string, password: string) => Promise<UserOut>;
@@ -87,12 +87,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(
-    async (email: string, password: string) => {
+    async (identifier: string, password: string) => {
       dispatch({ type: "SUBMIT" });
+      // The single operator logs in with a username; regular accounts use an
+      // email. An "@" disambiguates which field the backend should match.
+      const credentials = identifier.includes("@")
+        ? { email: identifier, password }
+        : { username: identifier, password };
       try {
         const response = await api.post<LoginResponse>(
           "/api/auth/login",
-          { email, password },
+          credentials,
           { silent: true },
         );
         if (response.mfa_required && response.mfa_pending_token) {
