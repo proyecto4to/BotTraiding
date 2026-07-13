@@ -44,6 +44,10 @@ UPSTREAMS: dict[str, tuple[str, str, str]] = {
     # root, so like "brokers" this segment forwards without a prefix
     # (the frontend calls /api/notify/notifications, /api/notify/preferences/...).
     "notify": ("NOTIFICATION_SERVICE_URL", "http://notification-service:8000", ""),
+    # market-data serves /market-data/* and /subscriptions/* at its root, so it
+    # forwards without a prefix (/api/market-data/market-data/BTCUSD, or
+    # /api/market-data/subscriptions).
+    "market-data": ("MARKET_DATA_URL", "http://market-data:8000", ""),
 }
 
 # Exact-path aliases: (segment, rest-without-trailing-slash) -> upstream path.

@@ -108,6 +108,7 @@ services:
       EXECUTION_ENGINE_URL: http://execution-engine:8000
       TRADING_ENGINE_URL: http://trading-engine:8000
       NOTIFICATION_SERVICE_URL: http://notification-service:8000
+      MARKET_DATA_URL: http://market-data:8000
       RATE_LIMIT_CAPACITY: ${RATE_LIMIT_CAPACITY:-60}
       RATE_LIMIT_REFILL_PER_SECOND: ${RATE_LIMIT_REFILL_PER_SECOND:-1.0}
       PROXY_TIMEOUT_SECONDS: ${PROXY_TIMEOUT_SECONDS:-30}
@@ -297,6 +298,26 @@ services:
       redis:
         condition: service_healthy
       nats:
+        condition: service_started
+
+  market-data:
+    build:
+      context: ../..
+      dockerfile: services/market-data/Dockerfile
+    ports:
+      - "8014:8000"
+    environment:
+      SERVICE_NAME: market-data
+      REDIS_URL: redis://redis:6379/0
+      BROKER_CONNECTORS_URL: http://broker-connectors:8000
+      MARKET_DATA_DEFAULT_BROKER: ${MARKET_DATA_DEFAULT_BROKER:-binance}
+      MARKET_DATA_POLL_INTERVAL: ${MARKET_DATA_POLL_INTERVAL:-15}
+      MARKET_DATA_MAX_BARS: ${MARKET_DATA_MAX_BARS:-500}
+      MARKET_DATA_CACHE_TTL: ${MARKET_DATA_CACHE_TTL:-120}
+    depends_on:
+      redis:
+        condition: service_healthy
+      broker-connectors:
         condition: service_started
 
   backtester:

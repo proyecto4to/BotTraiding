@@ -23,4 +23,5 @@ resources:
   - notification-service.yaml
   - scheduler.yaml
   - trading-engine.yaml
+  - market-data.yaml
   - hpa.yaml

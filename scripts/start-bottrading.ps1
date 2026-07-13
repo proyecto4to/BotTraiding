@@ -40,6 +40,7 @@ $env:OPTIMIZER_URL          = 'http://127.0.0.1:8009'
 $env:PAPER_TRADING_URL      = 'http://127.0.0.1:8010'
 $env:NOTIFICATION_SERVICE_URL = 'http://127.0.0.1:8011'
 $env:TRADING_ENGINE_URL     = 'http://127.0.0.1:8013'
+$env:MARKET_DATA_URL        = 'http://127.0.0.1:8014'
 
 # name, port
 $services = @(
@@ -56,7 +57,8 @@ $services = @(
     @('paper-trading',        8010),
     @('notification-service', 8011),
     @('scheduler',            8012),
-    @('trading-engine',       8013)
+    @('trading-engine',       8013),
+    @('market-data',          8014)
 )
 
 function Test-PortOpen([int]$Port) {
@@ -118,6 +120,6 @@ foreach ($svc in $services) {
 if ($down.Count -gt 0) {
     Write-Warning ("Sin responder: " + ($down -join ', ') + " - revisa logs\<servicio>.err.log")
 } else {
-    Write-Host 'Los 14 servicios responden.' -ForegroundColor Green
+    Write-Host "Los $($services.Count) servicios responden." -ForegroundColor Green
 }
 Write-Host 'BotTrading: http://localhost:3000  |  API: http://localhost:8000'

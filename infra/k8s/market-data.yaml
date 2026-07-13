@@ -1,0 +1,60 @@
+# Fase 15 / P2: market-data shared bar cache. Stateless (cache lives in Redis),
+# so it scales horizontally — HPA in hpa.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: market-data
+  namespace: tradingplatform
+  labels:
+    app: market-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: market-data
+  template:
+    metadata:
+      labels:
+        app: market-data
+    spec:
+      containers:
+        - name: market-data
+          image: tradingplatform/market-data:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          envFrom:
+            - configMapRef:
+                name: tradingplatform-env
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: market-data
+  namespace: tradingplatform
+  labels:
+    app: market-data
+spec:
+  selector:
+    app: market-data
+  ports:
+    - port: 8000
+      targetPort: 8000

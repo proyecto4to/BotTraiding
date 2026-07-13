@@ -28,6 +28,7 @@ jobs:
           - notification-service
           - scheduler
           - trading-engine
+          - market-data
     steps:
       - uses: actions/checkout@v4
 
@@ -100,6 +101,7 @@ jobs:
           - notification-service
           - scheduler
           - trading-engine
+          - market-data
     steps:
       - uses: actions/checkout@v4
 
