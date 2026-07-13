@@ -113,6 +113,23 @@ async def automation_state(_user=Depends(get_token_payload)) -> dict:
     return _automation_view(resp.json())
 
 
+@app.get("/api/automation/decisions")
+async def automation_decisions(limit: int = 20, _user=Depends(get_token_payload)) -> list:
+    """Recent autonomy decisions (regime, selection, actions) for the panel.
+
+    Read-only; any authenticated user. Degrades to an empty list when the
+    controller is unreachable so the panel renders an empty state."""
+    client = await proxy.get_http_client()
+    try:
+        resp = await client.get(
+            f"{AUTONOMY_URL}/autonomy/decisions", params={"limit": max(1, min(limit, 200))}
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        return []
+    return resp.json()
+
+
 @app.post("/api/automation/toggle")
 async def toggle_automation(request: Request, _admin=Depends(require_admin)) -> dict:
     """Flip the master switch: enable when off, disable when on (admin only).

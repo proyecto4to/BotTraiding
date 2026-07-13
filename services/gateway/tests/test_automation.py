@@ -39,3 +39,10 @@ def test_toggle_admin_degrades_when_controller_down(client):
     # Admin passes the gate; controller is down -> graceful degraded payload.
     assert resp.status_code == 200
     assert resp.json()["mode"] == "unavailable"
+
+
+def test_decisions_requires_auth_and_degrades(client):
+    assert client.get("/api/automation/decisions").status_code == 401
+    resp = client.get("/api/automation/decisions", headers=auth_headers(roles=["viewer"]))
+    assert resp.status_code == 200
+    assert resp.json() == []  # controller down -> empty list
