@@ -14,7 +14,7 @@ import os
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -127,6 +127,35 @@ async def automation_decisions(limit: int = 20, _user=Depends(get_token_payload)
         resp.raise_for_status()
     except httpx.HTTPError:
         return []
+    return resp.json()
+
+
+@app.get("/api/automation/readiness")
+async def automation_readiness(_user=Depends(get_token_payload)) -> dict:
+    """Paper->live gate status for the panel. Degrades when the controller is
+    unreachable so the panel still renders."""
+    client = await proxy.get_http_client()
+    try:
+        resp = await client.get(f"{AUTONOMY_URL}/autonomy/readiness")
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        return {"ready": False, "state": "unavailable", "gates": []}
+    return resp.json()
+
+
+@app.post("/api/automation/promote-live")
+async def automation_promote_live(request: Request, _admin=Depends(require_admin)) -> dict:
+    """Promote the automation to live (admin). Propagates the controller's 409
+    when the promotion gates are not met, so the panel can show why."""
+    client = await proxy.get_http_client()
+    headers = {"authorization": request.headers.get("authorization", "")}
+    try:
+        resp = await client.post(f"{AUTONOMY_URL}/autonomy/promote-live", headers=headers)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="autonomy controller unavailable") from exc
+    if resp.status_code >= 400:
+        detail = resp.json().get("detail") if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+        raise HTTPException(status_code=resp.status_code, detail=detail)
     return resp.json()
 
 

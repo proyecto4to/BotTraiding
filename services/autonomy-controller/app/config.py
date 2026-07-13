@@ -123,6 +123,34 @@ def rebalance_threshold() -> float:
     return float(os.environ.get("AUTONOMY_REBALANCE_THRESHOLD", "0.1"))
 
 
+# --- paper -> live promotion gates (P18) -------------------------------------
+def min_paper_days() -> float:
+    """Minimum paper-trading track record before live is allowed. Default 14."""
+    return float(os.environ.get("AUTONOMY_MIN_PAPER_DAYS", "14"))
+
+
+def max_promote_drawdown() -> float:
+    """Max observed drawdown that still allows promotion. Default 20%."""
+    return float(os.environ.get("AUTONOMY_MAX_PROMOTE_DRAWDOWN", "0.20"))
+
+
+def min_paper_return() -> float:
+    """Minimum total paper return to promote (default 0 = at least break-even)."""
+    return float(os.environ.get("AUTONOMY_MIN_PAPER_RETURN", "0.0"))
+
+
+def min_sharpe() -> float | None:
+    """Optional minimum Sharpe gate (unset/empty disables it)."""
+    raw = os.environ.get("AUTONOMY_MIN_SHARPE", "").strip()
+    return float(raw) if raw else None
+
+
+def backtest_coherence_tolerance() -> float | None:
+    """Optional paper-vs-backtest coherence gate (unset/empty disables it)."""
+    raw = os.environ.get("AUTONOMY_BACKTEST_COHERENCE", "").strip()
+    return float(raw) if raw else None
+
+
 # Bots the controller manages carry this name prefix so it only ever
 # creates/stops its own bots, never a human-created one.
 BOT_NAME_PREFIX = "auto:"

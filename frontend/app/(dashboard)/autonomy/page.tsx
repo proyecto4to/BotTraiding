@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Badge, EmptyState, LoadingSkeleton, SectionTitle } from "@/components/ui";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { fmtDateTime } from "@/lib/format";
 
@@ -54,6 +54,12 @@ interface Bot {
   strategy_keys: string[];
 }
 
+interface Readiness {
+  ready: boolean;
+  state: string;
+  gates: { name: string; passed: boolean; detail: string }[];
+}
+
 function stateTone(mode: string): "green" | "amber" | "red" | "neutral" {
   const m = mode.toLowerCase();
   if (m === "trading_paper" || m === "trading_live") return "green";
@@ -69,14 +75,17 @@ export default function AutonomyPage() {
   const [automation, setAutomation] = useState<AutomationState | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [bots, setBots] = useState<Bot[]>([]);
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
+  const [promoting, setPromoting] = useState(false);
 
   const load = useCallback(async () => {
-    const [st, dec, bt] = await Promise.allSettled([
+    const [st, dec, bt, rd] = await Promise.allSettled([
       api.get<AutomationState>("/api/automation/state", { silent: true }),
       api.get<Decision[]>("/api/automation/decisions", { silent: true, query: { limit: 20 } }),
       api.get<Bot[]>("/api/bots", { silent: true, query: { account_id: AUTONOMY_ACCOUNT } }),
+      api.get<Readiness>("/api/automation/readiness", { silent: true }),
     ]);
     if (st.status === "fulfilled") setAutomation(st.value);
     if (dec.status === "fulfilled") setDecisions(Array.isArray(dec.value) ? dec.value : []);
@@ -84,6 +93,7 @@ export default function AutonomyPage() {
       const list = Array.isArray(bt.value) ? bt.value : [];
       setBots(list.filter((b) => b.name?.startsWith("auto:")));
     }
+    if (rd.status === "fulfilled") setReadiness(rd.value);
     setLoading(false);
   }, []);
 
@@ -104,6 +114,26 @@ export default function AutonomyPage() {
       void load();
     } finally {
       setToggling(false);
+    }
+  };
+
+  const promoteLive = async () => {
+    if (
+      !window.confirm(
+        "Promote automation to LIVE (real money)? This is only allowed once every " +
+          "paper-trading gate passes, and can be reverted with the kill switch.",
+      )
+    )
+      return;
+    setPromoting(true);
+    try {
+      await api.post("/api/automation/promote-live", undefined, { silent: true });
+      void load();
+    } catch (err) {
+      const msg = err instanceof ApiError ? String(err.detail ?? err.message) : "Promotion failed";
+      window.alert(`Cannot go live: ${msg}`);
+    } finally {
+      setPromoting(false);
     }
   };
 
@@ -142,6 +172,49 @@ export default function AutonomyPage() {
           {toggling ? "Working…" : automation?.enabled ? "Disable automation" : "Enable automation"}
         </button>
       </div>
+
+      {/* Paper -> live readiness (P18) */}
+      {readiness && readiness.gates.length > 0 ? (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Badge tone={readiness.ready ? "green" : "amber"}>
+                {readiness.ready ? "READY FOR LIVE" : "NOT READY FOR LIVE"}
+              </Badge>
+              <span className="muted">
+                {readiness.ready
+                  ? "All paper-trading gates pass."
+                  : "Live trading stays locked until every gate passes."}
+              </span>
+            </div>
+            {isAdmin ? (
+              <button
+                type="button"
+                className="btn"
+                disabled={!readiness.ready || promoting || automation?.mode === "trading_live"}
+                onClick={promoteLive}
+              >
+                {promoting ? "Promoting…" : "Promote to live"}
+              </button>
+            ) : null}
+          </div>
+          <div className="table-wrap" style={{ marginTop: 10 }}>
+            <table className="table">
+              <tbody>
+                {readiness.gates.map((g) => (
+                  <tr key={g.name}>
+                    <td style={{ width: 24 }}>
+                      <Badge tone={g.passed ? "green" : "red"}>{g.passed ? "✓" : "✗"}</Badge>
+                    </td>
+                    <td style={{ fontFamily: "var(--mono)" }}>{g.name}</td>
+                    <td className="muted">{g.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       {loading ? (
         <LoadingSkeleton rows={4} />

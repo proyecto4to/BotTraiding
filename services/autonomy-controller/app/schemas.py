@@ -41,3 +41,17 @@ class TickResult(BaseModel):
     selection: list = Field(default_factory=list)
     actions: list = Field(default_factory=list)
     errors: list = Field(default_factory=list)
+
+
+class GateOut(BaseModel):
+    name: str
+    passed: bool
+    detail: str
+
+
+class ReadinessOut(BaseModel):
+    """Paper -> live promotion readiness (P18)."""
+
+    ready: bool
+    state: str
+    gates: list[GateOut] = Field(default_factory=list)

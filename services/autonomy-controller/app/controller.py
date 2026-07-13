@@ -18,11 +18,12 @@ going. trading-engine + risk-engine still enforce risk on every resulting order
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import allocation, config, events, statemachine
+from . import allocation, config, events, gates, statemachine
 from .clients import Clients, DownstreamError
 from .models import AutonomyDecisionRow
 from .schemas import TickResult
@@ -32,6 +33,53 @@ logger = logging.getLogger("autonomy-controller.controller")
 
 def _bot_name(symbol: str, strategy_key: str) -> str:
     return f"{config.BOT_NAME_PREFIX}{symbol}:{strategy_key}"
+
+
+def paper_trading_days(db: Session) -> float:
+    """Days since the automation first entered TRADING_PAPER (from the decision
+    log). 0 if it never has."""
+    first = db.execute(
+        select(AutonomyDecisionRow.created_at)
+        .where(AutonomyDecisionRow.state == statemachine.TRADING_PAPER)
+        .order_by(AutonomyDecisionRow.created_at.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if first is None:
+        return 0.0
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return max(0.0, (now - first).total_seconds() / 86400.0)
+
+
+async def build_readiness(db: Session, clients: Clients) -> gates.GateReport:
+    """Assemble the paper track record and evaluate the promotion gates (P18).
+
+    A portfolio-engine outage is a hard block: we never promote to live without
+    being able to read the account's real drawdown/return."""
+    try:
+        state = await clients.portfolio.get_state(config.account_id())
+    except DownstreamError as exc:
+        return gates.GateReport(
+            ready=False,
+            gates=[gates.GateResult("portfolio_available", False, str(exc))],
+        )
+
+    equity = float((state.get("account") or {}).get("equity", 0.0) or 0.0)
+    realized = float(state.get("realized_pnl", 0.0) or 0.0)
+    unrealized = float(state.get("unrealized_pnl", 0.0) or 0.0)
+    starting = equity - realized - unrealized
+    total_return = ((realized + unrealized) / starting) if starting > 0 else 0.0
+
+    snap = gates.PromotionSnapshot(
+        paper_days=paper_trading_days(db),
+        drawdown=float((state.get("drawdown") or {}).get("current_drawdown", 0.0) or 0.0),
+        total_return=total_return,
+        paper_return=total_return,
+    )
+    return gates.evaluate_gates(snap)
+
+
+def _execution_mode(state: str) -> str:
+    return "live" if state == statemachine.TRADING_LIVE else "paper"
 
 
 async def stop_all_autonomy_bots(clients: Clients) -> list[dict]:
@@ -120,7 +168,9 @@ async def _build_selection(clients: Clients, errors: list) -> tuple[list, dict]:
     return selection[: config.max_active_bots()], regime_summary
 
 
-async def _reconcile(clients: Clients, selection: list, errors: list) -> list:
+async def _reconcile(
+    clients: Clients, selection: list, errors: list, execution_mode: str = "paper"
+) -> list:
     """Align autonomy-owned bots to the selection."""
     actions: list[dict] = []
     try:
@@ -145,7 +195,7 @@ async def _reconcile(clients: Clients, selection: list, errors: list) -> list:
                         "name": name,
                         "account_id": config.account_id(),
                         "broker": config.broker(),
-                        "execution_mode": "paper",
+                        "execution_mode": execution_mode,
                         "symbols": [sel["symbol"]],
                         "timeframe": config.timeframe(),
                         "strategy_keys": [sel["strategy_key"]],
@@ -230,7 +280,7 @@ async def run_cycle(db: Session, clients: Clients) -> TickResult:
     selection, regime_summary = await _build_selection(clients, errors)
     # Capital allocation (P7): enrich each pick with its share of the budget.
     selection = allocation.build_allocation_plan(selection)
-    actions = await _reconcile(clients, selection, errors)
+    actions = await _reconcile(clients, selection, errors, _execution_mode(state))
 
     # First usable selection promotes LEARNING -> TRADING_PAPER.
     if state == statemachine.LEARNING and selection:

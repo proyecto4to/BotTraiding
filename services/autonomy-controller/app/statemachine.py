@@ -90,6 +90,15 @@ def promote_to_paper(db: Session, *, actor: str | None = None) -> AutonomyStateR
     return row
 
 
+def promote_to_live(db: Session, *, actor: str | None = None) -> AutonomyStateRow:
+    """TRADING_PAPER -> TRADING_LIVE. Only valid from paper; the promotion
+    gates (app/gates.py) and admin confirmation are enforced by the caller."""
+    row = get_state(db)
+    if row.state != TRADING_PAPER:
+        raise InvalidTransition("promotion to live is only valid from TRADING_PAPER")
+    return _set(db, TRADING_LIVE, reason="promoted to live (gates passed)", actor=actor)
+
+
 # --- presentation helpers (for the gateway master switch) --------------------
 
 _RECOMMENDATION = {

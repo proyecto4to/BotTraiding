@@ -134,12 +134,16 @@ class FakeTrading:
 
 
 class FakePortfolio:
-    """Aggregate risk snapshot for the global risk guard (P9)."""
+    """Aggregate risk snapshot for the risk guard (P9) and promotion gates (P18)."""
 
-    def __init__(self, drawdown=0.0, pnl_daily=0.0, equity=100000.0) -> None:
+    def __init__(
+        self, drawdown=0.0, pnl_daily=0.0, equity=100000.0, realized=0.0, unrealized=0.0
+    ) -> None:
         self.drawdown = drawdown
         self.pnl_daily = pnl_daily
         self.equity = equity
+        self.realized = realized
+        self.unrealized = unrealized
         self.fail = False
 
     async def get_state(self, account_id):
@@ -149,6 +153,8 @@ class FakePortfolio:
             "account": {"equity": self.equity},
             "drawdown": {"current_drawdown": self.drawdown},
             "pnl_daily": self.pnl_daily,
+            "realized_pnl": self.realized,
+            "unrealized_pnl": self.unrealized,
         }
 
 

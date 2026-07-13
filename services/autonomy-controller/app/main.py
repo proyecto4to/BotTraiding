@@ -22,7 +22,14 @@ from . import controller, events, statemachine
 from .clients import Clients, get_clients
 from .db import get_db
 from .deps import require_admin
-from .schemas import DecisionOut, HaltRequest, StateOut, TickResult
+from .schemas import (
+    DecisionOut,
+    GateOut,
+    HaltRequest,
+    ReadinessOut,
+    StateOut,
+    TickResult,
+)
 
 SERVICE_NAME = "autonomy-controller"
 
@@ -115,6 +122,49 @@ async def reset(
     except statemachine.InvalidTransition as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await events.publish_event("autonomy.reset", {"actor": admin.sub})
+    return StateOut(**statemachine.presentation(row))
+
+
+@app.get("/autonomy/readiness", response_model=ReadinessOut)
+async def readiness(
+    db: Session = Depends(get_db), clients: Clients = Depends(get_clients)
+) -> ReadinessOut:
+    """Whether the paper track record passes the gates to go live (P18)."""
+    report = await controller.build_readiness(db, clients)
+    return ReadinessOut(
+        ready=report.ready,
+        state=statemachine.get_state(db).state,
+        gates=[GateOut(name=g.name, passed=g.passed, detail=g.detail) for g in report.gates],
+    )
+
+
+@app.post("/autonomy/promote-live", response_model=StateOut)
+async def promote_live(
+    db: Session = Depends(get_db),
+    admin: TokenPayload = Depends(require_admin),
+    clients: Clients = Depends(get_clients),
+) -> StateOut:
+    """Promote TRADING_PAPER -> TRADING_LIVE (admin). Blocked unless every
+    promotion gate passes; autonomy bots are stopped so the next tick recreates
+    them in live mode. Live still also requires execution-engine's own
+    EXECUTION_LIVE_ENABLED — this is one of several independent safeguards."""
+    report = await controller.build_readiness(db, clients)
+    if not report.ready:
+        failing = [g.name for g in report.gates if not g.passed]
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"promotion gates not met: {failing}",
+        )
+    try:
+        row = statemachine.promote_to_live(db, actor=admin.sub)
+    except statemachine.InvalidTransition as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await controller.stop_all_autonomy_bots(clients)
+    await events.publish_event(
+        "autonomy.promoted_live",
+        {"actor": admin.sub, "gates": [g.name for g in report.gates]},
+    )
+    logger.warning("AUTONOMY PROMOTED TO LIVE by %s", admin.sub)
     return StateOut(**statemachine.presentation(row))
 
 

@@ -46,3 +46,22 @@ def test_decisions_requires_auth_and_degrades(client):
     resp = client.get("/api/automation/decisions", headers=auth_headers(roles=["viewer"]))
     assert resp.status_code == 200
     assert resp.json() == []  # controller down -> empty list
+
+
+def test_readiness_requires_auth_and_degrades(client):
+    assert client.get("/api/automation/readiness").status_code == 401
+    resp = client.get("/api/automation/readiness", headers=auth_headers(roles=["viewer"]))
+    assert resp.status_code == 200
+    assert resp.json()["ready"] is False
+
+
+def test_promote_live_requires_admin(client):
+    assert client.post("/api/automation/promote-live").status_code == 401
+    forbidden = client.post("/api/automation/promote-live", headers=auth_headers(roles=["trader"]))
+    assert forbidden.status_code == 403
+
+
+def test_promote_live_admin_502_when_controller_down(client):
+    resp = client.post("/api/automation/promote-live", headers=auth_headers(roles=["admin"]))
+    # Admin passes the gate; controller unreachable -> 502 (not a silent success).
+    assert resp.status_code == 502
