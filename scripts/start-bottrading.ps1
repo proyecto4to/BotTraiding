@@ -30,6 +30,11 @@ if (-not $env:OPERATOR_USERNAME) { $env:OPERATOR_USERNAME = 'BlasJon' }
 if (-not $env:OPERATOR_PASSWORD_HASH) { $env:OPERATOR_PASSWORD_HASH = '$2b$12$CMYf0XnhcFmiW504P68l6eBxVzJrXrJvRTmP5Mbaxkr/LNceL.1Zm' }
 $env:CORS_ORIGINS = 'http://localhost:3000,http://127.0.0.1:3000'
 $env:EXECUTION_MODE = 'paper'
+# Datos de mercado sinteticos: el bot funciona directo, sin credenciales de
+# broker. Para datos reales: MARKET_DATA_SOURCE=broker + conectar un broker.
+if (-not $env:MARKET_DATA_SOURCE) { $env:MARKET_DATA_SOURCE = 'synthetic' }
+# Ciclo de autonomia corto en local para ver el bot operar enseguida.
+if (-not $env:AUTONOMY_CYCLE_INTERVAL_SECONDS) { $env:AUTONOMY_CYCLE_INTERVAL_SECONDS = '20' }
 
 # URLs entre servicios (mismo mapa de puertos que docker-compose)
 $env:AUTH_SERVICE_URL       = 'http://127.0.0.1:8001'

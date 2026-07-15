@@ -358,6 +358,9 @@ services:
       SERVICE_NAME: market-data
       REDIS_URL: redis://redis:6379/0
       BROKER_CONNECTORS_URL: http://broker-connectors:8000
+      # broker = klines reales via broker-connectors; synthetic = datos
+      # generados para correr sin credenciales (el bot funciona directo).
+      MARKET_DATA_SOURCE: ${MARKET_DATA_SOURCE:-broker}
       MARKET_DATA_DEFAULT_BROKER: ${MARKET_DATA_DEFAULT_BROKER:-binance}
       MARKET_DATA_POLL_INTERVAL: ${MARKET_DATA_POLL_INTERVAL:-15}
       MARKET_DATA_MAX_BARS: ${MARKET_DATA_MAX_BARS:-500}
@@ -519,6 +522,7 @@ services:
       RISK_ENGINE_URL: http://risk-engine:8000
       EXECUTION_ENGINE_URL: http://execution-engine:8000
       BROKER_CONNECTORS_URL: http://broker-connectors:8000
+      MARKET_DATA_URL: http://market-data:8000
       TRADING_HTTP_TIMEOUT: ${TRADING_HTTP_TIMEOUT:-10}
       BOT_MAX_CONSECUTIVE_ERRORS: ${BOT_MAX_CONSECUTIVE_ERRORS:-5}
       BOT_BAR_LOOKBACK: ${BOT_BAR_LOOKBACK:-100}

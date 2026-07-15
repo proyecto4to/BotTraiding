@@ -5,7 +5,12 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.source import BrokerConnectorsSource, MarketDataSourceError
+from app.source import (
+    BrokerConnectorsSource,
+    MarketDataSourceError,
+    SyntheticMarketDataSource,
+    build_source,
+)
 
 
 def _bar_json(symbol, timeframe):
@@ -56,3 +61,22 @@ async def test_fetch_maps_transport_error():
 
     with pytest.raises(MarketDataSourceError):
         await source.fetch("binance", "BTCUSD", "1h", 5)
+
+
+async def test_synthetic_source_generates_valid_bars():
+    source = SyntheticMarketDataSource()
+    bars = await source.fetch("binance", "BTCUSDT", "1h", 50)
+    assert len(bars) == 50
+    for b in bars:
+        assert b.symbol == "BTCUSDT"
+        assert b.high >= b.low and b.close > 0
+    # Deterministic per (symbol, timeframe).
+    again = await source.fetch("binance", "BTCUSDT", "1h", 50)
+    assert [b.close for b in bars] == [b.close for b in again]
+
+
+def test_build_source_selects_synthetic(monkeypatch):
+    monkeypatch.setenv("MARKET_DATA_SOURCE", "synthetic")
+    assert isinstance(build_source(), SyntheticMarketDataSource)
+    monkeypatch.setenv("MARKET_DATA_SOURCE", "broker")
+    assert isinstance(build_source(), BrokerConnectorsSource)

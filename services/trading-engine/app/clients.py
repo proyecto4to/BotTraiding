@@ -92,15 +92,17 @@ class _BaseClient:
 
 
 class MarketDataClient(_BaseClient):
-    """Recent bars via broker-connectors GET /connectors/{broker}/historical.
+    """Recent bars via the market-data service GET /market-data/{symbol}.
 
-    This is trading-engine's ONLY contact with the broker layer, and it is
-    read-only market data — orders never go through here."""
+    market-data is the shared, cached bar source (one upstream fetch per
+    symbol serves every bot); it can be backed by a real broker or by a
+    synthetic source so the bot runs out of the box. Read-only market data —
+    orders never go through here."""
 
-    service = "broker-connectors"
+    service = "market-data"
 
     def _default_base_url(self) -> str:
-        return config.broker_connectors_url()
+        return config.market_data_url()
 
     async def get_bars(
         self,
@@ -111,21 +113,15 @@ class MarketDataClient(_BaseClient):
         account_id: str = "default",
     ) -> list[dict[str, Any]]:
         bars_needed = lookback if lookback is not None else config.bar_lookback()
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(seconds=timeframe_seconds(timeframe) * bars_needed)
         response = await self._request(
             "GET",
-            f"/connectors/{broker}/historical",
-            params={
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "start": start.isoformat(),
-                "end": end.isoformat(),
-                "account_id": account_id,
-            },
+            f"/market-data/{symbol}",
+            params={"broker": broker, "timeframe": timeframe, "limit": bars_needed},
         )
         self._raise_for_status(response)
-        return response.json()
+        body = response.json()
+        # market-data returns {..., "bars": [...]}; tolerate a bare list too.
+        return body.get("bars", []) if isinstance(body, dict) else body
 
 
 class StrategyClient(_BaseClient):

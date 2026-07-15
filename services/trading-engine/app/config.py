@@ -37,6 +37,10 @@ def broker_connectors_url() -> str:
     return os.environ.get("BROKER_CONNECTORS_URL", "http://broker-connectors:8000").rstrip("/")
 
 
+def market_data_url() -> str:
+    return os.environ.get("MARKET_DATA_URL", "http://market-data:8000").rstrip("/")
+
+
 def http_timeout() -> float:
     return float(os.environ.get("TRADING_HTTP_TIMEOUT", "10"))
 

@@ -23,7 +23,7 @@ from . import config
 from .cache import build_cache, cache_key
 from .poller import MarketDataPoller, SubscriptionRegistry
 from .schemas import BarsResponse, RefreshResult, Subscription, SubscriptionStatus
-from .source import BrokerConnectorsSource, MarketDataSource, MarketDataSourceError
+from .source import MarketDataSource, MarketDataSourceError, build_source
 
 SERVICE_NAME = "market-data"
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(SERVICE_NAME)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.cache = await build_cache(config.redis_url())
-    app.state.source = BrokerConnectorsSource()
+    app.state.source = build_source()
     app.state.registry = SubscriptionRegistry()
     app.state.poller = MarketDataPoller(
         app.state.source, app.state.cache, app.state.registry
@@ -143,11 +143,15 @@ async def get_bars(
             source="cache", count=len(bars), bars=bars,
         )
 
+    # Cold miss: always fetch the full series (max_bars) and cache it, so a
+    # later request for more bars than a small first request is still served
+    # from cache. Return the requested slice.
     try:
-        bars = await source.fetch(broker, symbol, timeframe, limit or config.max_bars())
+        full = await source.fetch(broker, symbol, timeframe, config.max_bars())
     except MarketDataSourceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    await cache.set(key, bars, config.cache_ttl())
+    await cache.set(key, full, config.cache_ttl())
+    bars = full[-limit:] if limit else full
     return BarsResponse(
         broker=broker, symbol=symbol, timeframe=timeframe,
         source="upstream", count=len(bars), bars=bars,
