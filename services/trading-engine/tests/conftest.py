@@ -12,22 +12,26 @@ from typing import Any, Optional
 os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ.pop("NATS_URL", None)  # events fall back to logging in tests
+os.environ.pop("REDIS_URL", None)  # bot locks default to in-memory in tests
+os.environ.pop("BOT_LOCK_BACKEND", None)
 
 import pytest
+from app import db as db_module
+from app.clients import Clients, DownstreamError
+from app.models import Base
 from jose import jwt
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from app import db as db_module
-from app.clients import Clients, DownstreamError
-from app.models import Base
 
 # Env vars individual tests monkeypatch; scrub so config never leaks.
 _ENV_VARS = [
     "BOT_MAX_CONSECUTIVE_ERRORS",
     "BOT_BAR_LOOKBACK",
     "TRADING_HTTP_TIMEOUT",
+    "BOT_LOCK_BACKEND",
+    "BOT_LOCK_TTL_SECONDS",
+    "REDIS_URL",
 ]
 
 
@@ -299,9 +303,8 @@ def make_bot_payload(
 
 @pytest.fixture()
 def client():
-    from fastapi.testclient import TestClient
-
     from app.main import app
+    from fastapi.testclient import TestClient
 
     with TestClient(app) as test_client:
         yield test_client

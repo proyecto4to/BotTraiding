@@ -18,7 +18,6 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
-
 from trading_contracts.models import AccountState, Bar, ExecutionReport, Order, Position
 
 from .connectors.errors import (
@@ -114,7 +113,9 @@ _CONNECTOR_ERROR_STATUS: list[tuple[type[Exception], int]] = [
 
 def _register_connector_error_handlers() -> None:
     for error_cls, status_code in _CONNECTOR_ERROR_STATUS:
-        def handler(request: Request, exc: Exception, status_code: int = status_code) -> JSONResponse:
+        def handler(
+            request: Request, exc: Exception, status_code: int = status_code
+        ) -> JSONResponse:
             return JSONResponse(status_code=status_code, content={"detail": str(exc)})
 
         app.add_exception_handler(error_cls, handler)
@@ -133,7 +134,10 @@ def _require_connected(broker: str, account_id: str = "default"):
     if connector is None or not connector.is_connected():
         raise HTTPException(
             status_code=409,
-            detail=f"{broker}/{account_id} is not connected; call /connectors/{broker}/connect first",
+            detail=(
+                f"{broker}/{account_id} is not connected; "
+                f"call /connectors/{broker}/connect first"
+            ),
         )
     return connector
 
@@ -211,8 +215,12 @@ async def connect(broker: str, body: ConnectRequest) -> ConnectResponse:
     except Exception as exc:  # noqa: BLE001 - surfaced as a generic upstream failure
         raise HTTPException(status_code=502, detail=f"could not connect to {broker}") from exc
 
+    # P3: share the session state so other replicas can serve this session.
+    registry.mark_connected(broker, body.account_id, connector.is_connected())
+
     return ConnectResponse(
-        broker=broker, account_id=body.account_id, connected=connector.is_connected(), demo=body.demo
+        broker=broker, account_id=body.account_id,
+        connected=connector.is_connected(), demo=body.demo,
     )
 
 
@@ -263,7 +271,8 @@ async def get_historical(
     if limit is not None:
         if not hasattr(connector, "get_recent_bars"):
             raise HTTPException(
-                status_code=422, detail=f"{broker} does not support limit-based history; pass start and end"
+                status_code=422,
+                detail=f"{broker} does not support limit-based history; pass start and end",
             )
         return await connector.get_recent_bars(symbol, timeframe, limit)
     raise HTTPException(status_code=422, detail="provide either start and end, or limit")

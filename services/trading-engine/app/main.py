@@ -23,7 +23,6 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
 from trading_contracts.auth import TokenPayload
 
 from . import events, orchestrator
@@ -219,7 +218,12 @@ async def start_bot(
     db.commit()
     db.refresh(row)
     if not runner.is_running(bot_id):
-        runner.start(bot_id)
+        try:
+            runner.start(bot_id)
+        except RuntimeError as exc:
+            # Lost the cross-replica race (P3): another replica's loop owns
+            # this bot. status=running is already correct, so just report it.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     await events.publish_event(
         "bot.started",

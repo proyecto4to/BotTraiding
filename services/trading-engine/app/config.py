@@ -14,6 +14,12 @@ Env vars:
 - DATABASE_URL: bot/cycle persistence (see app/db.py).
 - JWT_SECRET: shared with auth-service (trading_contracts.auth).
 - NATS_URL: optional event bus; events fall back to logging when unset.
+- REDIS_URL / BOT_LOCK_BACKEND (memory|redis|auto, default auto): backend for
+  the per-bot run locks (app/bot_locks.py). auto uses Redis iff REDIS_URL is
+  set; unreachable Redis degrades to in-memory locks with a warning.
+- BOT_LOCK_TTL_SECONDS: base lease TTL for a bot's run lock (default 120).
+  The loop refreshes the lease each cycle with 2x the cycle interval on top,
+  so a crashed replica's locks expire and its bots become startable again.
 """
 
 from __future__ import annotations
@@ -51,3 +57,7 @@ def max_consecutive_errors() -> int:
 
 def bar_lookback() -> int:
     return int(os.environ.get("BOT_BAR_LOOKBACK", "100"))
+
+
+def bot_lock_ttl() -> float:
+    return float(os.environ.get("BOT_LOCK_TTL_SECONDS", "120"))

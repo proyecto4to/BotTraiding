@@ -96,6 +96,8 @@ services:
       SERVICE_NAME: gateway
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
+      # P3: memory|redis|auto (auto usa Redis si REDIS_URL esta seteada).
+      RATE_LIMIT_BACKEND: ${RATE_LIMIT_BACKEND:-auto}
       NATS_URL: nats://nats:4222
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in infra/docker/.env, see .env.example}
       AUTH_SERVICE_URL: http://auth-service:8000
@@ -292,6 +294,8 @@ services:
       SERVICE_NAME: broker-connectors
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
       REDIS_URL: redis://redis:6379/0
+      # P3: memory|redis|auto (auto usa Redis si REDIS_URL esta seteada).
+      SESSION_STORE: ${SESSION_STORE:-auto}
       NATS_URL: nats://nats:4222
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in infra/docker/.env, see .env.example}
       # memory (default) = Fase 3 in-memory store; db = Fernet-encrypted rows
@@ -537,6 +541,10 @@ services:
       MARKET_DATA_URL: http://market-data:8000
       TRADING_HTTP_TIMEOUT: ${TRADING_HTTP_TIMEOUT:-10}
       BOT_MAX_CONSECUTIVE_ERRORS: ${BOT_MAX_CONSECUTIVE_ERRORS:-5}
+      # P3: locks de bot compartidos (memory|redis|auto; auto usa Redis si
+      # REDIS_URL esta seteada). El lease expira solo si una replica muere.
+      BOT_LOCK_BACKEND: ${BOT_LOCK_BACKEND:-auto}
+      BOT_LOCK_TTL_SECONDS: ${BOT_LOCK_TTL_SECONDS:-120}
       BOT_BAR_LOOKBACK: ${BOT_BAR_LOOKBACK:-100}
     depends_on:
       postgres:

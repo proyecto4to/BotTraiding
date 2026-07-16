@@ -36,6 +36,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import config, events
+from .bot_locks import BotLockStore, build_lock_store
 from .clients import Clients, DownstreamError, get_clients
 from .models import BotRow, CycleReportRow
 from .schemas import (
@@ -327,24 +328,38 @@ class BotRunner:
 
     Each task loops: reload bot config -> run_cycle -> persist CycleReport ->
     publish bot.cycle -> sleep(cycle_interval). BOT_MAX_CONSECUTIVE_ERRORS
-    consecutive degraded/error cycles set status=error and stop the task."""
+    consecutive degraded/error cycles set status=error and stop the task.
+
+    P3: the lock store (app/bot_locks.py) extends "one loop per bot" across
+    replicas -- with the Redis backend, a second replica sees the bot as
+    running and cannot start a duplicate loop; the lease is refreshed every
+    cycle and released when the loop ends."""
 
     def __init__(
         self,
         session_factory: Callable[[], Session] = _default_session_factory,
         clients_factory: Callable[[], Clients] = get_clients,
+        lock_store: Optional[BotLockStore] = None,
     ) -> None:
         self.session_factory = session_factory
         self.clients_factory = clients_factory
+        self.lock_store: BotLockStore = lock_store or build_lock_store()
         self._tasks: dict[str, asyncio.Task] = {}
 
     def is_running(self, bot_id: str) -> bool:
         task = self._tasks.get(bot_id)
-        return task is not None and not task.done()
+        if task is not None and not task.done():
+            return True
+        # No local task: the bot may still be driven by another replica.
+        return self.lock_store.is_locked(bot_id)
 
     def start(self, bot_id: str) -> None:
         if self.is_running(bot_id):
             raise RuntimeError(f"bot '{bot_id}' already has a running loop")
+        if not self.lock_store.acquire(bot_id, config.bot_lock_ttl()):
+            raise RuntimeError(
+                f"bot '{bot_id}' already has a running loop (lock held elsewhere)"
+            )
         self._tasks[bot_id] = asyncio.create_task(
             self._run_loop(bot_id), name=f"bot-loop-{bot_id}"
         )
@@ -383,6 +398,11 @@ class BotRunner:
                 bot = self._load_spec(bot_id)
                 if bot is None or bot.status != BOT_STATUS_RUNNING:
                     return  # deleted or stopped elsewhere
+
+                # Keep the cross-replica lease alive well past the next sleep.
+                self.lock_store.refresh(
+                    bot_id, bot.cycle_interval_seconds * 2 + config.bot_lock_ttl()
+                )
 
                 try:
                     outcome = await run_cycle(bot, self.clients_factory())
@@ -442,25 +462,33 @@ class BotRunner:
             raise
         finally:
             self._tasks.pop(bot_id, None)
+            self.lock_store.release(bot_id)
 
 
 #: Process-wide runner used by the API endpoints.
 runner = BotRunner()
 
 
-def mark_orphaned_bots(db: Session) -> int:
+def mark_orphaned_bots(db: Session, lock_store: Optional[BotLockStore] = None) -> int:
     """Startup reconciliation: a fresh process has no loops, so bots left in
     'running' by a crash/restart are marked status=error (a human must
     explicitly restart them - auto-resuming trading, especially live, is not
-    safe without review). Returns how many bots were marked."""
+    safe without review). Bots whose run lock is held (another replica is
+    actively driving them, P3) are NOT orphans and are skipped. Returns how
+    many bots were marked."""
+    locks = lock_store if lock_store is not None else runner.lock_store
     rows = db.scalars(
         select(BotRow).where(BotRow.status == BOT_STATUS_RUNNING)
     ).all()
+    marked = 0
     for row in rows:
+        if locks.is_locked(row.id):
+            continue  # a live replica owns this bot's loop
         row.status = BOT_STATUS_ERROR
         row.status_reason = "orphaned by service restart; manual restart required"
         logger.warning(
             "bot_orphaned %s",
             json.dumps({"event": "bot_orphaned", "bot_id": row.id, "name": row.name}),
         )
-    return len(rows)
+        marked += 1
+    return marked

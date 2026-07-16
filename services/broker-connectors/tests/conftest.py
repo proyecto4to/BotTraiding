@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import os
 from typing import Callable
 
 import httpx
 import pytest
 
-from app.registry import registry
+# The suite must always exercise the in-memory registry deterministically;
+# per-test Redis registries are built explicitly in test_session_store.py.
+os.environ.pop("REDIS_URL", None)
+os.environ.pop("SESSION_STORE", None)
+
+from app.registry import registry  # noqa: E402 - env scrub must run first
 
 
 @pytest.fixture(autouse=True)

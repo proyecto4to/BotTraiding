@@ -9,17 +9,20 @@ import time
 
 os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("DATABASE_URL", "sqlite://")
+# The suite must exercise the in-memory limiter deterministically; per-test
+# Redis limiters are built explicitly in test_rate_limit.py.
+os.environ.pop("REDIS_URL", None)
+os.environ.pop("RATE_LIMIT_BACKEND", None)
 
 import pytest
-from jose import jwt
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from app import db as db_module
 from app import rate_limit
 from app.models import Base, Market, Symbol
 from app.seed_data import MARKET_SEED
+from jose import jwt
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 JWT_SECRET = "test-secret"
 ALGORITHM = "HS256"
@@ -126,8 +129,7 @@ def seeded_symbols(db_session, seeded_markets):
 
 @pytest.fixture()
 def client():
-    from fastapi.testclient import TestClient
-
     from app.main import app
+    from fastapi.testclient import TestClient
 
     return TestClient(app)
