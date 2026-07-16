@@ -12,9 +12,8 @@ os.environ["SCHEDULER_AUTOSTART"] = "false"
 os.environ.pop("SCHEDULER_JOBS", None)
 
 import pytest
-from jose import jwt
-
 from app import clients, jobs
+from jose import jwt
 
 
 @pytest.fixture(autouse=True)
@@ -34,9 +33,8 @@ def _reset_seams():
 
 @pytest.fixture()
 def client():
-    from fastapi.testclient import TestClient
-
     from app.main import app
+    from fastapi.testclient import TestClient
 
     # context manager runs the lifespan (loads the job registry)
     with TestClient(app) as test_client:

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-
 from trading_contracts.auth import TokenError, TokenPayload, decode_token
 
 bearer_scheme = HTTPBearer(auto_error=False)

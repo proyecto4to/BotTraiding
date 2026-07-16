@@ -46,17 +46,23 @@ class HttpStrategyEngineClient(StrategyEngineClient):
 class OptimizerClient(ABC):
     @abstractmethod
     async def trigger_optimization(
-        self, strategy_key: str, params: dict[str, Any]
+        self, strategy_key: str, params: dict[str, Any], *, promote: bool = False
     ) -> dict[str, Any]:
-        """Start one re-optimization run for a strategy."""
+        """Start one re-optimization run for a strategy. ``promote=True``
+        requests a GATED promotion: the optimizer itself only applies params
+        that pass its walk-forward out-of-sample validation."""
 
 
-def build_optimize_payload(strategy_key: str, params: dict[str, Any]) -> dict[str, Any]:
+def build_optimize_payload(
+    strategy_key: str, params: dict[str, Any], *, promote: bool = False
+) -> dict[str, Any]:
     """POST /optimize body for a scheduled re-optimization.
 
-    ``promote`` is HARDCODED to False: a cron job may trigger the search,
-    but applying params stays an explicit, out-of-sample-validated act
-    (docs/ARCHITECTURE.md Fase 12).
+    ``promote`` is decided by the CALLING JOB TYPE, never by job params:
+    the exploratory ``reoptimize`` job always sends False; only the
+    ``learning_loop`` job (P6) sends True — and even then the optimizer
+    applies nothing that fails its out-of-sample gate
+    (docs/ARCHITECTURE.md Fase 12: nunca sin validacion OOS).
     """
     lookback_days = int(params.get("lookback_days", 180))
     end = datetime.now(timezone.utc).replace(microsecond=0)
@@ -71,16 +77,16 @@ def build_optimize_payload(strategy_key: str, params: dict[str, Any]) -> dict[st
         "end": end.isoformat(),
         "search_type": params.get("search_type", "grid"),
         "budget": int(params.get("budget", 16)),
-        "promote": False,
+        "promote": promote,
     }
 
 
 class HttpOptimizerClient(OptimizerClient):
     async def trigger_optimization(
-        self, strategy_key: str, params: dict[str, Any]
+        self, strategy_key: str, params: dict[str, Any], *, promote: bool = False
     ) -> dict[str, Any]:
         base = _url("OPTIMIZER_URL", "http://optimizer:8000")
-        payload = build_optimize_payload(strategy_key, params)
+        payload = build_optimize_payload(strategy_key, params, promote=promote)
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             resp = await client.post(f"{base}/optimize", json=payload)
             resp.raise_for_status()

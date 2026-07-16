@@ -48,8 +48,13 @@ def jwt_secret() -> str:
 
 
 def system_user_id() -> str:
+    """The autonomy's system identity. Bots it creates carry this as
+    created_by, and strategy-engine resolves stored configs BY USER — so it
+    must match the optimizer's OPTIMIZER_SYSTEM_USER_ID for the bots to pick
+    up the params the learning loop promotes (P6). Both services default to
+    the same shared platform-system UUID."""
     return os.environ.get(
-        "AUTONOMY_SYSTEM_USER_ID", "00000000-0000-0000-0000-0000000000a1"
+        "AUTONOMY_SYSTEM_USER_ID", "00000000-0000-0000-0000-000000000001"
     )
 
 

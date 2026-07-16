@@ -23,16 +23,27 @@ class FakeStrategyEngineClient(StrategyEngineClient):
 
 
 class FakeOptimizerClient(OptimizerClient):
-    def __init__(self, fail_for: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        fail_for: set[str] | None = None,
+        results: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         self.triggered: list[tuple[str, dict[str, Any]]] = []
+        self.promote_flags: list[bool] = []
         self._fail_for = fail_for or set()
+        #: strategy_key -> canned /optimize response (learning-loop tests).
+        self._results = results or {}
 
     async def trigger_optimization(
-        self, strategy_key: str, params: dict[str, Any]
+        self, strategy_key: str, params: dict[str, Any], *, promote: bool = False
     ) -> dict[str, Any]:
         if strategy_key in self._fail_for:
             raise RuntimeError(f"optimizer unavailable for {strategy_key}")
         self.triggered.append((strategy_key, params))
+        self.promote_flags.append(promote)
+        canned = self._results.get(strategy_key)
+        if canned is not None:
+            return dict(canned)
         return {"id": f"run-{len(self.triggered)}", "status": "pending"}
 
 

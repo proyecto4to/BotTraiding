@@ -322,6 +322,9 @@ services:
       TRADING_ENGINE_URL: http://trading-engine:8000
       PORTFOLIO_ENGINE_URL: http://portfolio-engine:8000
       STRATEGY_ENGINE_URL: http://strategy-engine:8000
+      # P6: debe coincidir con OPTIMIZER_SYSTEM_USER_ID para que los bots de
+      # autonomia evaluen con los params que el lazo de aprendizaje promueve.
+      AUTONOMY_SYSTEM_USER_ID: ${AUTONOMY_SYSTEM_USER_ID:-00000000-0000-0000-0000-000000000001}
       AUTONOMY_SYMBOLS: ${AUTONOMY_SYMBOLS:-BTCUSDT}
       AUTONOMY_TIMEFRAME: ${AUTONOMY_TIMEFRAME:-1h}
       AUTONOMY_MARKET: ${AUTONOMY_MARKET:-crypto}
@@ -502,6 +505,8 @@ services:
       OPTIMIZER_URL: http://optimizer:8000
       AI_ENGINE_URL: http://ai-engine:8000
       AUTONOMY_URL: http://autonomy-controller:8000
+      # P6: cadencia del lazo de aprendizaje (reoptimizar con promocion gated).
+      LEARNING_LOOP_CRON: ${LEARNING_LOOP_CRON:-0 4 * * *}
       # Defaults to pinging the three services above; override to add more,
       # e.g. "gateway=http://gateway:8000,risk-engine=http://risk-engine:8000"
       HEALTH_PING_URLS: ${HEALTH_PING_URLS:-}

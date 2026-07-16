@@ -20,7 +20,6 @@ from typing import Any, Optional
 from fastapi import Depends, FastAPI, HTTPException
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
-
 from trading_contracts.auth import TokenPayload
 
 from .config import JobDefinition

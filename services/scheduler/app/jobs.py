@@ -3,7 +3,9 @@
 Each handler is an async function taking its JobDefinition and returning
 a JSON-serializable result summary. Handlers only ever call downstream
 services through the injectable clients - the scheduler holds NO trading
-logic and NEVER promotes parameters itself.
+logic and NEVER applies parameters itself: the ``learning_loop`` job (P6)
+may REQUEST a promotion, but the decision stays in the optimizer's
+walk-forward out-of-sample gate.
 """
 
 from __future__ import annotations
@@ -45,6 +47,57 @@ async def run_reoptimize(job: JobDefinition) -> dict[str, Any]:
     }
 
 
+async def run_learning_loop(job: JobDefinition) -> dict[str, Any]:
+    """P6 — close the continuous-learning loop.
+
+    Per enabled strategy: re-optimize with GATED promotion (promote=true).
+    The optimizer walk-forward-validates every candidate out-of-sample and
+    applies the winner to strategy-engine only when it beats the baseline;
+    the autonomy bots then evaluate with the new config on their next cycle
+    (shared system identity, see OPTIMIZER_SYSTEM_USER_ID). An improvement
+    that fails the OOS gate is reported under ``rejected`` and NOT applied.
+    """
+    strategies = await clients.get_strategy_engine().list_enabled_strategies()
+    applied: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    in_progress: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    for strategy in strategies:
+        key = strategy.get("key") or strategy.get("strategy_key")
+        if not key:
+            continue
+        try:
+            run = await clients.get_optimizer().trigger_optimization(
+                key, job.params, promote=True
+            )
+        except Exception as exc:  # noqa: BLE001 - isolate per-strategy failures
+            logger.warning("learning loop failed for '%s': %s", key, exc)
+            errors.append({"strategy_key": key, "error": str(exc)})
+            continue
+        entry: dict[str, Any] = {"strategy_key": key, "run_id": run.get("id")}
+        if run.get("status") != "completed":
+            # big budgets run in the optimizer's background; the outcome is
+            # queryable via GET /optimize/{run_id}.
+            in_progress.append(entry)
+        elif run.get("applied"):
+            entry["params"] = run.get("best_params")
+            applied.append(entry)
+            logger.warning(
+                "LEARNING LOOP: promoted params APPLIED for '%s' (run %s): %s",
+                key, run.get("id"), run.get("best_params"),
+            )
+        else:
+            entry["reasons"] = (run.get("decision") or {}).get("reasons") or []
+            rejected.append(entry)
+    return {
+        "strategies_seen": len(strategies),
+        "applied": applied,
+        "rejected": rejected,
+        "in_progress": in_progress,
+        "errors": errors,
+    }
+
+
 async def run_regime_refresh(job: JobDefinition) -> dict[str, Any]:
     response = await clients.get_ai_engine().refresh_regime(job.params)
     return {"response": response}
@@ -70,6 +123,7 @@ async def run_autonomy_tick(job: JobDefinition) -> dict[str, Any]:
 
 JOB_HANDLERS: dict[str, JobHandler] = {
     "reoptimize": run_reoptimize,
+    "learning_loop": run_learning_loop,
     "regime_refresh": run_regime_refresh,
     "health_ping": run_health_ping,
     "autonomy_tick": run_autonomy_tick,
