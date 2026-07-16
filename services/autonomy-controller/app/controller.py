@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import allocation, config, events, gates, statemachine
+from . import allocation, config, events, gates, governor, statemachine
 from .clients import Clients, DownstreamError
 from .models import AutonomyDecisionRow
 from .schemas import TickResult
@@ -91,7 +91,8 @@ async def stop_all_autonomy_bots(clients: Clients) -> list[dict]:
         logger.warning("could not list bots to stop: %s", exc)
         return actions
     for bot in bots:
-        if str(bot.get("name", "")).startswith(config.BOT_NAME_PREFIX) and bot.get("status") == "running":
+        is_auto = str(bot.get("name", "")).startswith(config.BOT_NAME_PREFIX)
+        if is_auto and bot.get("status") == "running":
             try:
                 await clients.trading.stop_bot(bot["id"])
                 actions.append({"action": "stop", "bot": bot["name"]})
@@ -282,6 +283,10 @@ async def run_cycle(db: Session, clients: Clients) -> TickResult:
     selection = allocation.build_allocation_plan(selection)
     actions = await _reconcile(clients, selection, errors, _execution_mode(state))
 
+    # Strategy lifecycle governor (P5): act on the AI's validated advice
+    # (disable underperformers, re-enable regime-favored strategies).
+    governor_actions = await governor.run_governor(db, clients, selection, errors)
+
     # First usable selection promotes LEARNING -> TRADING_PAPER.
     if state == statemachine.LEARNING and selection:
         state_row = statemachine.promote_to_paper(db, actor="autonomy")
@@ -289,7 +294,7 @@ async def run_cycle(db: Session, clients: Clients) -> TickResult:
 
     summary = (
         f"{len(selection)} strategies selected, {len(actions)} action(s), "
-        f"{len(errors)} error(s)"
+        f"{len(governor_actions)} governor action(s), {len(errors)} error(s)"
     )
     _persist(
         db, state=state, summary=summary, regime=regime_summary,
@@ -297,8 +302,9 @@ async def run_cycle(db: Session, clients: Clients) -> TickResult:
     )
     logger.info("autonomy cycle: %s", summary)
     return TickResult(
-        state=state, acted=bool(actions), summary=summary,
-        selection=selection, actions=actions, errors=errors,
+        state=state, acted=bool(actions or governor_actions), summary=summary,
+        selection=selection, actions=actions, governor=governor_actions,
+        errors=errors,
     )
 
 

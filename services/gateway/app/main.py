@@ -130,6 +130,23 @@ async def automation_decisions(limit: int = 20, _user=Depends(get_token_payload)
     return resp.json()
 
 
+@app.get("/api/automation/governor")
+async def automation_governor(limit: int = 20, _user=Depends(get_token_payload)) -> dict:
+    """Strategy lifecycle governor (P5): mode + audited enable/disable actions.
+
+    Read-only; any authenticated user. Degrades to an 'unavailable' shape when
+    the controller is unreachable so the panel still renders."""
+    client = await proxy.get_http_client()
+    try:
+        resp = await client.get(
+            f"{AUTONOMY_URL}/autonomy/governor", params={"limit": max(1, min(limit, 200))}
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        return {"mode": "unavailable", "actions": []}
+    return resp.json()
+
+
 @app.get("/api/automation/readiness")
 async def automation_readiness(_user=Depends(get_token_payload)) -> dict:
     """Paper->live gate status for the panel. Degrades when the controller is
@@ -154,7 +171,8 @@ async def automation_promote_live(request: Request, _admin=Depends(require_admin
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="autonomy controller unavailable") from exc
     if resp.status_code >= 400:
-        detail = resp.json().get("detail") if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+        is_json = resp.headers.get("content-type", "").startswith("application/json")
+        detail = resp.json().get("detail") if is_json else resp.text
         raise HTTPException(status_code=resp.status_code, detail=detail)
     return resp.json()
 

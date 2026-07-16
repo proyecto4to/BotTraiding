@@ -34,6 +34,10 @@ def portfolio_engine_url() -> str:
     return os.environ.get("PORTFOLIO_ENGINE_URL", "http://portfolio-engine:8000").rstrip("/")
 
 
+def strategy_engine_url() -> str:
+    return os.environ.get("STRATEGY_ENGINE_URL", "http://strategy-engine:8000").rstrip("/")
+
+
 def http_timeout() -> float:
     return float(os.environ.get("AUTONOMY_HTTP_TIMEOUT", "10"))
 
@@ -121,6 +125,29 @@ def rebalance_threshold() -> float:
     """Relative change in a bot's risk_per_trade that triggers a rebalance
     (stop -> patch -> start). Default 10%; avoids churn on tiny weight drift."""
     return float(os.environ.get("AUTONOMY_REBALANCE_THRESHOLD", "0.1"))
+
+
+# --- strategy lifecycle governor (P5) -----------------------------------------
+def governor_mode() -> str:
+    """off | shadow | active. shadow (default) records what it WOULD do without
+    touching the strategy catalog; active applies via strategy-engine."""
+    return os.environ.get("AUTONOMY_GOVERNOR_MODE", "shadow").strip().lower()
+
+
+def governor_max_changes() -> int:
+    """Max APPLIED catalog changes per rolling window (anti-flapping cap)."""
+    return int(os.environ.get("AUTONOMY_GOVERNOR_MAX_CHANGES", "3"))
+
+
+def governor_window_minutes() -> float:
+    """Rolling window for the change cap and per-strategy action dedup."""
+    return float(os.environ.get("AUTONOMY_GOVERNOR_WINDOW_MINUTES", "60"))
+
+
+def governor_rec_max_age_minutes() -> float:
+    """Only ai-engine recommendations newer than this may trigger a disable.
+    Default 24h — stale advice never turns a strategy off."""
+    return float(os.environ.get("AUTONOMY_GOVERNOR_REC_MAX_AGE_MINUTES", "1440"))
 
 
 # --- paper -> live promotion gates (P18) -------------------------------------

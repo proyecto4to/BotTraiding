@@ -40,7 +40,34 @@ class TickResult(BaseModel):
     summary: str
     selection: list = Field(default_factory=list)
     actions: list = Field(default_factory=list)
+    governor: list = Field(default_factory=list)
     errors: list = Field(default_factory=list)
+
+
+class GovernorActionOut(BaseModel):
+    """One audited strategy lifecycle decision (P5)."""
+
+    id: str
+    created_at: datetime
+    strategy_key: str
+    action: str
+    mode: str
+    status: str
+    reason: str
+    rule: Optional[str] = None
+    severity: Optional[str] = None
+    recommendation_id: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class GovernorStatusOut(BaseModel):
+    """Governor mode + guardrails + recent actions (newest first)."""
+
+    mode: str
+    max_changes_per_window: int
+    window_minutes: float
+    actions: list[GovernorActionOut] = Field(default_factory=list)
 
 
 class GateOut(BaseModel):

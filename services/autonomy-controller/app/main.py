@@ -15,16 +15,17 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy.orm import Session
-
 from trading_contracts.auth import TokenPayload
 
-from . import controller, events, statemachine
+from . import config, controller, events, governor, statemachine
 from .clients import Clients, get_clients
 from .db import get_db
 from .deps import require_admin
 from .schemas import (
     DecisionOut,
     GateOut,
+    GovernorActionOut,
+    GovernorStatusOut,
     HaltRequest,
     ReadinessOut,
     StateOut,
@@ -187,3 +188,19 @@ def decisions(
     limit: int = Query(default=50, ge=1, le=500), db: Session = Depends(get_db)
 ) -> list[DecisionOut]:
     return [DecisionOut.model_validate(row) for row in controller.recent_decisions(db, limit)]
+
+
+@app.get("/autonomy/governor", response_model=GovernorStatusOut)
+def governor_status(
+    limit: int = Query(default=50, ge=1, le=500), db: Session = Depends(get_db)
+) -> GovernorStatusOut:
+    """Strategy lifecycle governor (P5): mode, guardrails and audited actions."""
+    return GovernorStatusOut(
+        mode=governor.resolved_mode(),
+        max_changes_per_window=config.governor_max_changes(),
+        window_minutes=config.governor_window_minutes(),
+        actions=[
+            GovernorActionOut.model_validate(row)
+            for row in governor.recent_actions(db, limit)
+        ],
+    )

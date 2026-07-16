@@ -321,6 +321,7 @@ services:
       MARKET_DATA_URL: http://market-data:8000
       TRADING_ENGINE_URL: http://trading-engine:8000
       PORTFOLIO_ENGINE_URL: http://portfolio-engine:8000
+      STRATEGY_ENGINE_URL: http://strategy-engine:8000
       AUTONOMY_SYMBOLS: ${AUTONOMY_SYMBOLS:-BTCUSDT}
       AUTONOMY_TIMEFRAME: ${AUTONOMY_TIMEFRAME:-1h}
       AUTONOMY_MARKET: ${AUTONOMY_MARKET:-crypto}
@@ -338,6 +339,10 @@ services:
       AUTONOMY_MIN_PAPER_RETURN: ${AUTONOMY_MIN_PAPER_RETURN:-0.0}
       AUTONOMY_MIN_SHARPE: ${AUTONOMY_MIN_SHARPE:-}
       AUTONOMY_BACKTEST_COHERENCE: ${AUTONOMY_BACKTEST_COHERENCE:-}
+      AUTONOMY_GOVERNOR_MODE: ${AUTONOMY_GOVERNOR_MODE:-shadow}
+      AUTONOMY_GOVERNOR_MAX_CHANGES: ${AUTONOMY_GOVERNOR_MAX_CHANGES:-3}
+      AUTONOMY_GOVERNOR_WINDOW_MINUTES: ${AUTONOMY_GOVERNOR_WINDOW_MINUTES:-60}
+      AUTONOMY_GOVERNOR_REC_MAX_AGE_MINUTES: ${AUTONOMY_GOVERNOR_REC_MAX_AGE_MINUTES:-1440}
     depends_on:
       postgres:
         condition: service_healthy
@@ -346,6 +351,8 @@ services:
       market-data:
         condition: service_started
       trading-engine:
+        condition: service_started
+      strategy-engine:
         condition: service_started
 
   market-data:

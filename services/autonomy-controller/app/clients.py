@@ -1,9 +1,11 @@
 """Injectable async clients for the services the controller orchestrates.
 
-Market data (bars), ai-engine (regime + selection) and trading-engine (bots).
-Every network call goes through these so tests inject fakes — no network. The
-trading-engine calls carry a short-lived service JWT (the controller acts as an
-admin system user); market-data and ai-engine are internal and unauthenticated.
+Market data (bars), ai-engine (regime + selection + recommendations),
+trading-engine (bots), portfolio-engine (aggregate risk) and strategy-engine
+(catalog enable/disable, the governor's actuator). Every network call goes
+through these so tests inject fakes — no network. The trading-engine calls
+carry a short-lived service JWT (the controller acts as an admin system user);
+the other services are internal and unauthenticated.
 """
 
 from __future__ import annotations
@@ -86,6 +88,29 @@ class AiClient:
         resp = await _request(self._client, "POST", url, json=body)
         return resp.json().get("ranked", [])
 
+    async def recommendations(self, limit: int = 100) -> list[dict]:
+        """Persisted underperformance recommendations, newest first."""
+        url = f"{config.ai_engine_url()}/ai/recommendations"
+        resp = await _request(self._client, "GET", url, params={"limit": limit})
+        return resp.json()
+
+
+class StrategyEngineClient:
+    """Strategy catalog: list + enable/disable (the governor's actuator)."""
+
+    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+        self._client = client
+
+    async def list_strategies(self) -> list[dict]:
+        url = f"{config.strategy_engine_url()}/strategies"
+        resp = await _request(self._client, "GET", url)
+        return resp.json()
+
+    async def set_enabled(self, strategy_key: str, enabled: bool) -> dict:
+        url = f"{config.strategy_engine_url()}/strategies/{strategy_key}"
+        resp = await _request(self._client, "PATCH", url, json={"enabled": enabled})
+        return resp.json()
+
 
 class TradingEngineClient:
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
@@ -139,10 +164,12 @@ class Clients:
     ai: AiClient
     trading: TradingEngineClient
     portfolio: PortfolioClient
+    strategies: StrategyEngineClient
 
 
 def get_clients() -> Clients:
     """FastAPI dependency (overridden with fakes in tests)."""
     return Clients(
-        MarketDataClient(), AiClient(), TradingEngineClient(), PortfolioClient()
+        MarketDataClient(), AiClient(), TradingEngineClient(), PortfolioClient(),
+        StrategyEngineClient(),
     )

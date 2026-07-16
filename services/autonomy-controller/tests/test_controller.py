@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from app import controller
 from app import db as db_module
 from app import statemachine as sm

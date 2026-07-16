@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
-import pytest
-
-from app import controller
+from app import controller, gates
 from app import db as db_module
-from app import gates
 from app import statemachine as sm
-from app.models import AutonomyDecisionRow
 
 
 def _session():

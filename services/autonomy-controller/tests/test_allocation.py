@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-from app import allocation
-from app import controller
+from app import allocation, controller
 from app import db as db_module
 from app import statemachine as sm
 
@@ -57,8 +54,10 @@ def test_allocation_caps_per_symbol():
 
 
 def test_allocation_changed_threshold():
-    assert allocation.allocation_changed({"risk_per_trade": 0.006}, {"risk_per_trade": 0.006}, threshold=0.1) is False
-    assert allocation.allocation_changed({"risk_per_trade": 0.006}, {"risk_per_trade": 0.009}, threshold=0.1) is True
+    same = {"risk_per_trade": 0.006}
+    drifted = {"risk_per_trade": 0.009}
+    assert allocation.allocation_changed(same, {"risk_per_trade": 0.006}, threshold=0.1) is False
+    assert allocation.allocation_changed(same, drifted, threshold=0.1) is True
     assert allocation.allocation_changed(None, {"risk_per_trade": 0.004}) is True
 
 

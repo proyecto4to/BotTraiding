@@ -3,6 +3,9 @@
 - AutonomyStateRow: single row holding the current state-machine state.
 - AutonomyDecisionRow: an audit trail of every tick (regime, selection,
   actions taken, errors) so every automated decision is explainable.
+- GovernorActionRow: audit trail of the strategy lifecycle governor (P5) —
+  every enable/disable it decided, whether it was applied, shadowed, capped
+  or failed, and the recommendation that justified it.
 
 Dialect-agnostic (Postgres via Alembic version_table="alembic_version_autonomy",
 SQLite locally via create_all).
@@ -13,7 +16,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, JSON, String, Text, func
+from sqlalchemy import JSON, DateTime, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -52,3 +55,19 @@ class AutonomyDecisionRow(Base):
     selection: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     actions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     errors: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+
+class GovernorActionRow(Base):
+    __tablename__ = "autonomy_governor_actions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    strategy_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    action: Mapped[str] = mapped_column(String(10), nullable=False)  # enable|disable
+    mode: Mapped[str] = mapped_column(String(10), nullable=False)  # shadow|active
+    # applied | shadow (logged only) | capped (deferred by the change cap) | failed
+    status: Mapped[str] = mapped_column(String(10), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    rule: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    severity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    recommendation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)

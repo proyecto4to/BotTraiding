@@ -12,14 +12,13 @@ os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ.pop("NATS_URL", None)
 
 import pytest
+from app import db as db_module
+from app.clients import Clients, DownstreamError
+from app.models import Base
 from jose import jwt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from app import db as db_module
-from app.clients import Clients, DownstreamError
-from app.models import Base
 
 
 @pytest.fixture(autouse=True)
@@ -72,7 +71,9 @@ class FakeAi:
         self.ranked_value = ranked if ranked is not None else [
             {"key": "sma_crossover", "category": "trend", "weight": 1.0}
         ]
+        self.recommendations_value: list[dict] = []
         self.fail = False
+        self.fail_recommendations = False
 
     async def regime(self, bars):
         if self.fail:
@@ -81,6 +82,11 @@ class FakeAi:
 
     async def select(self, regime, market, timeframe, performance):
         return list(self.ranked_value)
+
+    async def recommendations(self, limit=100):
+        if self.fail_recommendations:
+            raise DownstreamError("ai down")
+        return [dict(r) for r in self.recommendations_value[:limit]]
 
 
 class FakeTrading:
@@ -158,9 +164,39 @@ class FakePortfolio:
         }
 
 
+class FakeStrategies:
+    """Strategy catalog fake: key -> enabled, records every toggle."""
+
+    def __init__(self) -> None:
+        self.catalog: dict[str, bool] = {
+            "sma_crossover": True,
+            "rsi2_reversion": True,
+        }
+        self.toggled: list[tuple[str, bool]] = []
+        self.list_calls = 0
+        self.fail = False
+        self.fail_toggle = False
+
+    async def list_strategies(self):
+        self.list_calls += 1
+        if self.fail:
+            raise DownstreamError("strategy-engine down")
+        return [{"key": k, "enabled": v} for k, v in sorted(self.catalog.items())]
+
+    async def set_enabled(self, strategy_key, enabled):
+        if self.fail_toggle:
+            raise DownstreamError("strategy-engine down")
+        self.catalog[strategy_key] = enabled
+        self.toggled.append((strategy_key, enabled))
+        return {"key": strategy_key, "enabled": enabled}
+
+
 class FakeClients(Clients):
     def __init__(self) -> None:
-        super().__init__(FakeMarketData(), FakeAi(), FakeTrading(), FakePortfolio())
+        super().__init__(
+            FakeMarketData(), FakeAi(), FakeTrading(), FakePortfolio(),
+            FakeStrategies(),
+        )
 
 
 @pytest.fixture()
@@ -190,10 +226,9 @@ def trader_headers():
 
 @pytest.fixture()
 def client(fake_clients):
-    from fastapi.testclient import TestClient
-
     from app.clients import get_clients
     from app.main import app
+    from fastapi.testclient import TestClient
 
     app.dependency_overrides[get_clients] = lambda: fake_clients
     with TestClient(app) as test_client:

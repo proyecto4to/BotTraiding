@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
-
 os.environ.setdefault("AUTONOMY_URL", "http://127.0.0.1:59999")
 
 from .conftest import auth_headers
@@ -53,6 +51,15 @@ def test_readiness_requires_auth_and_degrades(client):
     resp = client.get("/api/automation/readiness", headers=auth_headers(roles=["viewer"]))
     assert resp.status_code == 200
     assert resp.json()["ready"] is False
+
+
+def test_governor_requires_auth_and_degrades(client):
+    assert client.get("/api/automation/governor").status_code == 401
+    resp = client.get("/api/automation/governor", headers=auth_headers(roles=["viewer"]))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "unavailable"
+    assert body["actions"] == []
 
 
 def test_promote_live_requires_admin(client):
