@@ -15,9 +15,13 @@ import os
 
 import httpx
 
+from trading_contracts.auth import service_auth_header
+
 from . import config
 
 logger = logging.getLogger("execution-engine.portfolio")
+
+SERVICE_NAME = "execution-engine"
 
 DEFAULT_TIMEOUT_SECONDS = float(os.environ.get("PORTFOLIO_ENGINE_TIMEOUT", "5"))
 
@@ -37,7 +41,9 @@ class PortfolioForwarder:
                 base_url=self.base_url, timeout=DEFAULT_TIMEOUT_SECONDS
             ) as client:
                 response = await client.post(
-                    f"/portfolio/{account_id}/executions", json=payload
+                    f"/portfolio/{account_id}/executions",
+                    json=payload,
+                    headers=service_auth_header(SERVICE_NAME),
                 )
                 response.raise_for_status()
                 return True

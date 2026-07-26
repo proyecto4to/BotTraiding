@@ -7,6 +7,8 @@ import os
 
 os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ.setdefault("DEFAULT_STARTING_CASH", "100000")
+# Signing key for the service tokens the state-mutating endpoints now require.
+os.environ.setdefault("JWT_SECRET", "test-secret")
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -46,6 +48,18 @@ def _test_db():
 
 @pytest.fixture()
 def client():
+    """Speaks as execution-engine does: the ingest/mark endpoints reject
+    unauthenticated callers. `anon_client` covers the rejection itself."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from trading_contracts.auth import service_auth_header
+
+    return TestClient(app, headers=service_auth_header("execution-engine"))
+
+
+@pytest.fixture()
+def anon_client():
     from fastapi.testclient import TestClient
 
     from app.main import app

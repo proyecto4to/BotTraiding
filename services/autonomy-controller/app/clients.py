@@ -4,8 +4,7 @@ Market data (bars), ai-engine (regime + selection + recommendations),
 trading-engine (bots), portfolio-engine (aggregate risk) and strategy-engine
 (catalog enable/disable, the governor's actuator). Every network call goes
 through these so tests inject fakes — no network. The trading-engine calls
-carry a short-lived service JWT (the controller acts as an admin system user);
-the other services are internal and unauthenticated.
+carry a short-lived service JWT (see `service_token`).
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from jose import jwt
+from trading_contracts.auth import SERVICE_ROLE
 
 from . import config
 
@@ -24,13 +24,24 @@ class DownstreamError(Exception):
 
 
 def service_token() -> str:
-    """Mint a short-lived admin access token so trading-engine accepts bot
-    creation/start/stop (paper bots need any user; the controller uses admin so
-    the same identity also covers a future live promotion)."""
+    """Mint a short-lived token identifying the controller to its downstreams.
+
+    Carries the `service` role, not `admin`: nothing the controller calls needs
+    admin (trading-engine's bot endpoints accept any valid access token, and
+    strategy-engine's catalog toggle has no role gate), so a long-running
+    process was holding an admin credential it never used. The operator-only
+    actions — promote-live, halt, reset — are triggered by a person through the
+    gateway and still require a real admin token.
+
+    `sub` stays the platform system user id rather than "service:autonomy":
+    strategy-engine resolves stored strategy configs BY USER, and it has to
+    match the optimizer's OPTIMIZER_SYSTEM_USER_ID for the learning loop (P6)
+    to feed promoted params back into the bots.
+    """
     now = datetime.now(timezone.utc)
     payload = {
         "sub": config.system_user_id(),
-        "roles": ["admin"],
+        "roles": [SERVICE_ROLE],
         "type": "access",
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=5)).timestamp()),

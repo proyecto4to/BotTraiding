@@ -103,11 +103,6 @@ Suma: **982 tests backend** (todos en verde) + **16 frontend**.
 
 ## Qué falta para producción
 
-- **Autenticación entre servicios**: los servicios internos exponen endpoints de
-  escritura sin token (colocar orden en broker-connectors, ingesta de portfolio,
-  `/risk/validate`). Hoy se contienen por red — solo el gateway y el frontend
-  escuchan fuera de loopback — pero el perímetro no es autorización: falta un
-  token de servicio como el que ya usa autonomy-controller para trading-engine.
 - **Credenciales reales de broker**: los conectores apuntan a URLs demo. El
   credential store cifrado (Fernet, `CREDENTIAL_STORE=db`) ya existe pero el
   default sigue siendo `memory`; falta Vault/KMS para las claves.

@@ -22,9 +22,12 @@ def test_get_limits_returns_defaults_when_unset(client):
     assert body["limits"]["max_slippage"] is None
 
 
-def test_put_limits_requires_auth(client):
+def test_put_limits_requires_auth(anon_client, client):
     body = default_limits().model_dump()
-    assert client.put(f"/risk/limits/{ACC}", json=body).status_code == 401
+    assert anon_client.put(f"/risk/limits/{ACC}", json=body).status_code == 401
+    # A service token authenticates but does not authorise: changing the risk
+    # envelope stays a human, admin-only decision.
+    assert client.put(f"/risk/limits/{ACC}", json=body).status_code == 403
 
 
 def test_put_limits_rejects_non_admin(client, trader_headers):
@@ -86,14 +89,16 @@ def test_get_circuit_breaker_defaults_to_normal(client):
     assert body["error_count"] == 0
 
 
-def test_reset_requires_admin(client, trader_headers):
-    assert client.post(f"/risk/circuit-breaker/{ACC}/reset").status_code == 401
+def test_reset_requires_admin(anon_client, client, trader_headers):
+    assert anon_client.post(f"/risk/circuit-breaker/{ACC}/reset").status_code == 401
     assert (
         client.post(
             f"/risk/circuit-breaker/{ACC}/reset", headers=trader_headers
         ).status_code
         == 403
     )
+    # Clearing a tripped breaker is a human decision: no service may do it.
+    assert client.post(f"/risk/circuit-breaker/{ACC}/reset").status_code == 403
 
 
 def test_reset_returns_breaker_to_normal_and_audits(client, admin_headers):

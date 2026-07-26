@@ -21,11 +21,14 @@ from typing import Protocol, runtime_checkable
 import httpx
 
 from trading_contracts import ExecutionMode, ExecutionReport, Order
+from trading_contracts.auth import service_auth_header
 
 from . import config
 from .retry import PermanentTransportError, TransientTransportError
 
 logger = logging.getLogger("execution-engine.transports")
+
+SERVICE_NAME = "execution-engine"
 
 TRANSIENT_STATUS_CODES = {409, 500, 502, 503, 504}
 
@@ -52,10 +55,17 @@ class ExecutionTransport(Protocol):
     ) -> bool: ...
 
 
+def _auth_headers() -> dict[str, str]:
+    """Sign outbound calls as this service: broker-connectors now requires an
+    authenticated caller to place or cancel an order, so being able to reach the
+    port is no longer enough to trade."""
+    return service_auth_header(SERVICE_NAME)
+
+
 async def _post_json(url: str, payload: dict) -> httpx.Response:
     try:
         async with httpx.AsyncClient(timeout=config.transport_timeout()) as client:
-            return await client.post(url, json=payload)
+            return await client.post(url, json=payload, headers=_auth_headers())
     except httpx.HTTPError as exc:
         raise TransientTransportError(f"transport unreachable: {exc}") from exc
 
@@ -63,7 +73,7 @@ async def _post_json(url: str, payload: dict) -> httpx.Response:
 async def _get_json(url: str, params: dict | None = None) -> httpx.Response:
     try:
         async with httpx.AsyncClient(timeout=config.transport_timeout()) as client:
-            return await client.get(url, params=params)
+            return await client.get(url, params=params, headers=_auth_headers())
     except httpx.HTTPError as exc:
         raise TransientTransportError(f"transport unreachable: {exc}") from exc
 

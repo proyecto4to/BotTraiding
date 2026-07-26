@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app import events, portfolio, reconcile
 from app.db import get_db
-from app.deps import require_admin
+from app.deps import require_admin, require_caller
 from app.schemas import (
     DrawdownReport,
     ExecutionIngest,
@@ -101,7 +101,10 @@ def get_drawdown(account_id: str, db: Session = Depends(get_db)) -> DrawdownRepo
 
 @app.post("/portfolio/{account_id}/executions", response_model=ExecutionIngestResult)
 def ingest_execution(
-    account_id: str, ingest: ExecutionIngest, db: Session = Depends(get_db)
+    account_id: str,
+    ingest: ExecutionIngest,
+    db: Session = Depends(get_db),
+    _caller: TokenPayload = Depends(require_caller),
 ) -> ExecutionIngestResult:
     """Ingest an ExecutionReport (execution-engine callback): updates the
     position, cash, realized PnL and peak equity."""
@@ -110,7 +113,10 @@ def ingest_execution(
 
 @app.post("/portfolio/{account_id}/mark", response_model=PortfolioState)
 def mark_portfolio(
-    account_id: str, mark: MarkRequest, db: Session = Depends(get_db)
+    account_id: str,
+    mark: MarkRequest,
+    db: Session = Depends(get_db),
+    _caller: TokenPayload = Depends(require_caller),
 ) -> PortfolioState:
     """Update marks (and optionally injected return series) then recompute
     unrealized PnL, floating drawdown and peak equity."""

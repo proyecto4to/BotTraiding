@@ -14,7 +14,7 @@ from app.connectors.http_base import BrokerConfig
 from app.registry import ConnectorRegistry, RedisConnectorRegistry, build_registry
 from fastapi.testclient import TestClient
 
-from .conftest import default_handler, make_mock_client
+from .conftest import default_handler, make_mock_client, service_headers
 
 
 @pytest.fixture()
@@ -111,7 +111,7 @@ def test_connect_endpoint_shares_session_with_other_replica(
     # Seed the connector with a mocked transport so connect() pings the mock.
     replica_a.get_or_create("bybit", make_config(), client=make_mock_client(default_handler))
 
-    client = TestClient(main_module.app)
+    client = TestClient(main_module.app, headers=service_headers())
     response = client.post(
         "/connectors/bybit/connect",
         json={"api_key": "key-1", "api_secret": "secret-1", "demo": True},

@@ -1,7 +1,13 @@
-"""Auth dependencies for admin-only endpoints (limits PUT, breaker reset).
+"""Auth dependencies.
 
 DB-free JWT verification via the shared trading_contracts.auth helper
 (same JWT_SECRET as auth-service); roles come straight from the token.
+
+- ``require_admin``: limits PUT, breaker reset — changing the safety envelope.
+- ``require_caller``: /risk/validate. It writes risk_events and drives the
+  circuit breaker's error/rejection counters, so an anonymous caller could
+  push the breaker toward SOFT/HARD halt and stop the platform trading, or
+  simply flood the audit trail with decisions nobody made.
 """
 
 from __future__ import annotations
@@ -31,6 +37,11 @@ def get_token_payload(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Not an access token"
         )
+    return payload
+
+
+def require_caller(payload: TokenPayload = Depends(get_token_payload)) -> TokenPayload:
+    """Any authenticated caller: a sibling service or a logged-in user."""
     return payload
 
 

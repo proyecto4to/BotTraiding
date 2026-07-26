@@ -12,9 +12,9 @@ from app.main import app
 from app.registry import registry
 
 from .binance_mocks import BinanceMockAPI, make_binance_client
-from .conftest import default_handler, make_mock_client
+from .conftest import default_handler, make_mock_client, service_headers
 
-client = TestClient(app)
+client = TestClient(app, headers=service_headers())
 
 
 def seed_binance(mock_api: BinanceMockAPI | None = None) -> BinanceMockAPI:

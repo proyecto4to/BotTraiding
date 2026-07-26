@@ -27,9 +27,9 @@ def test_enable_disable_flow(client, admin_headers):
     assert disabled.json()["state"] == "OFF"
 
 
-def test_tick_runs_a_cycle_and_persists(client, admin_headers, fake_clients):
+def test_tick_runs_a_cycle_and_persists(client, admin_headers, service_headers, fake_clients):
     client.post("/autonomy/enable", headers=admin_headers)
-    tick = client.post("/autonomy/tick")
+    tick = client.post("/autonomy/tick", headers=service_headers)
     assert tick.status_code == 200
     assert tick.json()["acted"] is True
 
@@ -38,8 +38,23 @@ def test_tick_runs_a_cycle_and_persists(client, admin_headers, fake_clients):
     assert decisions[0]["selection"][0]["strategy_key"] == "sma_crossover"
 
 
-def test_tick_when_off_does_not_act(client, fake_clients):
-    tick = client.post("/autonomy/tick")
+def test_tick_requires_authentication(client, admin_headers, fake_clients):
+    """A cycle creates, starts, stops and rebalances real bots, so an anonymous
+    caller must not be able to drive the automation on its own schedule."""
+    client.post("/autonomy/enable", headers=admin_headers)
+
+    assert client.post("/autonomy/tick").status_code == 401
+    assert (
+        client.post(
+            "/autonomy/tick", headers={"Authorization": "Bearer not-a-real-jwt"}
+        ).status_code
+        == 401
+    )
+    assert fake_clients.trading.created == []
+
+
+def test_tick_when_off_does_not_act(client, service_headers, fake_clients):
+    tick = client.post("/autonomy/tick", headers=service_headers)
     assert tick.status_code == 200
     assert tick.json()["acted"] is False
     assert fake_clients.trading.created == []
@@ -59,9 +74,11 @@ def test_halt_and_reset_flow(client, admin_headers):
     assert reset.json()["state"] == "OFF"
 
 
-def test_disable_stops_running_autonomy_bots(client, admin_headers, fake_clients):
+def test_disable_stops_running_autonomy_bots(
+    client, admin_headers, service_headers, fake_clients
+):
     client.post("/autonomy/enable", headers=admin_headers)
-    client.post("/autonomy/tick")  # creates + starts a bot
+    client.post("/autonomy/tick", headers=service_headers)  # creates + starts a bot
     assert any(b["status"] == "running" for b in fake_clients.trading.bots)
 
     client.post("/autonomy/disable", headers=admin_headers)

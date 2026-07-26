@@ -22,7 +22,11 @@ from typing import Any, Optional
 
 import httpx
 
+from trading_contracts.auth import service_auth_header
+
 from . import config
+
+SERVICE_NAME = "trading-engine"
 
 TIMEFRAME_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 
@@ -75,6 +79,12 @@ class _BaseClient:
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         kwargs.setdefault("timeout", self.timeout)
+        # Every outbound call identifies this service. risk-engine and
+        # execution-engine reject unauthenticated callers on the endpoints that
+        # decide or place trades, so being able to reach the port is not enough.
+        # An explicit Authorization passed by the caller wins.
+        headers = {**service_auth_header(SERVICE_NAME), **(kwargs.pop("headers", None) or {})}
+        kwargs["headers"] = headers
         try:
             if self._http is not None:
                 return await self._http.request(method, path, **kwargs)

@@ -20,7 +20,7 @@ from trading_contracts.auth import TokenPayload
 from . import config, controller, events, governor, statemachine
 from .clients import Clients, get_clients
 from .db import get_db
-from .deps import require_admin
+from .deps import require_admin, require_caller
 from .schemas import (
     DecisionOut,
     GateOut,
@@ -171,10 +171,15 @@ async def promote_live(
 
 @app.post("/autonomy/tick", response_model=TickResult)
 async def tick(
-    db: Session = Depends(get_db), clients: Clients = Depends(get_clients)
+    db: Session = Depends(get_db),
+    clients: Clients = Depends(get_clients),
+    _caller: TokenPayload = Depends(require_caller),
 ) -> TickResult:
     """Run one autonomy cycle. Internal endpoint (scheduler-driven); not exposed
-    through the gateway."""
+    through the gateway.
+
+    Authenticated: a cycle creates, starts, stops and rebalances real bots, so
+    an anonymous caller could drive the automation on its own schedule."""
     result = await controller.run_cycle(db, clients)
     await events.publish_event(
         "autonomy.cycle",

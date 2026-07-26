@@ -141,10 +141,36 @@ max_exposure_per_symbol, max_exposure_per_sector, circuit_breaker_thresholds{}
   acepta del cliente.
 - **Perímetro de red**: solo el gateway y el frontend escuchan fuera de
   loopback; el resto de servicios y la infraestructura están atados a
-  `127.0.0.1` (ver `infra/docker/docker-compose.yml`). Esto sostiene la sección
-  3 a nivel de red, pero es contención, no autorización — varios endpoints
-  internos de escritura siguen sin pedir token y eso está pendiente (ver README,
-  "Qué falta para producción").
+  `127.0.0.1` (ver `infra/docker/docker-compose.yml`). Sostiene la sección 3 a
+  nivel de red, pero es contención, no autorización — de ahí lo siguiente.
+
+### 8.2 Autenticación entre servicios
+
+Los servicios se llaman entre sí directamente (risk-engine → portfolio-engine,
+execution-engine → broker-connectors, scheduler → autonomy-controller). Esas
+llamadas llevan un **token de servicio**: `mint_service_token()` /
+`service_auth_header()` en `trading_contracts.auth`, firmado con el mismo
+`JWT_SECRET`, con rol `service`, `sub = "service:<nombre>"` y 120 s de vida.
+
+- El rol `service` es distinto de `admin` **a propósito**: un endpoint interno
+  puede aceptar a un servicio sin aceptar a cualquier usuario admin, y la
+  auditoría distingue una persona de un proceso. Lo inverso también aplica:
+  reconciliar el portafolio, cambiar límites de riesgo o resetear el circuit
+  breaker siguen exigiendo `admin`, y un token de servicio recibe 403.
+- Se exige en lo que **mueve dinero o estado**, no en las lecturas:
+
+  | Servicio | Endpoints con `require_caller` |
+  |---|---|
+  | `broker-connectors` | `connect`, `orders`, `orders/{id}/cancel` |
+  | `portfolio-engine` | `executions` (ingesta), `mark` |
+  | `risk-engine` | `risk/validate` |
+  | `autonomy-controller` | `autonomy/tick` |
+
+Esto **no** protege contra quien ya tenga el `JWT_SECRET` — es autenticación
+entre componentes, no un límite de confianza dentro del proceso. Lo que cierra
+es que «poder alcanzar el puerto» equivalga a «poder operar»: antes, un POST a
+broker-connectors colocaba una orden real sin sizing, sin límites, sin circuit
+breaker y sin registro de quién la pidió, saltándose el principio 4 entero.
 
 ### 8.1 Progresión a dinero real
 

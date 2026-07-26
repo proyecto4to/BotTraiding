@@ -55,6 +55,18 @@ def db_session():
 
 @pytest.fixture()
 def client():
+    """Speaks as trading-engine does: /risk/validate rejects unauthenticated
+    callers. `anon_client` covers the rejection itself."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from trading_contracts.auth import service_auth_header
+
+    return TestClient(app, headers=service_auth_header("trading-engine"))
+
+
+@pytest.fixture()
+def anon_client():
     from fastapi.testclient import TestClient
 
     from app.main import app

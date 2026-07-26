@@ -100,7 +100,12 @@ def _admin_token(roles=("admin",)):
 
 @pytest.fixture()
 def app_client():
-    client = TestClient(app)
+    # Carries a service token by default: the ingest helper below writes state,
+    # and those endpoints reject unauthenticated callers. The reconcile calls
+    # under test pass their own admin header explicitly, which overrides it.
+    from trading_contracts.auth import service_auth_header
+
+    client = TestClient(app, headers=service_auth_header("execution-engine"))
     yield client
     app.dependency_overrides.clear()
 
@@ -144,11 +149,12 @@ def test_build_report_tolerance_absorbs_fee_dust():
 # --- endpoint ----------------------------------------------------------------
 
 
-def test_reconcile_requires_admin(app_client):
+def test_reconcile_requires_admin(app_client, anon_client):
     fake = FakeBrokerClient([_broker("BTCUSD", 8)])
     app.dependency_overrides[reconcile.get_broker_client] = lambda: fake
 
-    no_token = app_client.post("/portfolio/acct-1/reconcile", json={"broker": "binance"})
+    # anon_client carries no default header, unlike app_client.
+    no_token = anon_client.post("/portfolio/acct-1/reconcile", json={"broker": "binance"})
     assert no_token.status_code == 401
 
     non_admin = app_client.post(
@@ -157,6 +163,11 @@ def test_reconcile_requires_admin(app_client):
         headers={"Authorization": f"Bearer {_admin_token(roles=['trader'])}"},
     )
     assert non_admin.status_code == 403
+
+    # A service token is not a substitute for an admin: reconciliation is a
+    # human-initiated operation and must not be reachable machine-to-machine.
+    as_service = app_client.post("/portfolio/acct-1/reconcile", json={"broker": "binance"})
+    assert as_service.status_code == 403
 
 
 def test_reconcile_report_only_mutates_nothing(app_client):

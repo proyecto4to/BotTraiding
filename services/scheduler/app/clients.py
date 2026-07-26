@@ -15,11 +15,21 @@ from typing import Any, Optional
 
 import httpx
 
+from trading_contracts.auth import service_auth_header
+
 DEFAULT_TIMEOUT = 30.0
+
+SERVICE_NAME = "scheduler"
 
 
 def _url(env_var: str, default: str) -> str:
     return os.environ.get(env_var, default).rstrip("/")
+
+
+def _auth() -> dict[str, str]:
+    """Identify the scheduler on outbound calls. /autonomy/tick drives real bot
+    lifecycle, so it requires an authenticated caller."""
+    return service_auth_header(SERVICE_NAME)
 
 
 # --- strategy-engine ------------------------------------------------------------
@@ -129,7 +139,7 @@ class HttpAutonomyClient(AutonomyClient):
     async def tick(self) -> dict[str, Any]:
         base = _url("AUTONOMY_URL", "http://autonomy-controller:8000")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            resp = await client.post(f"{base}/autonomy/tick")
+            resp = await client.post(f"{base}/autonomy/tick", headers=_auth())
             resp.raise_for_status()
             return resp.json()
 

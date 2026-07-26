@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app import circuit_breaker as cb
 from app import events, limits as limits_repo, pipeline
 from app.db import get_db
-from app.deps import require_admin
+from app.deps import require_admin, require_caller
 from app.models import RiskEvent
 from app.portfolio_client import PortfolioClient, get_portfolio_client
 from app.schemas import (
@@ -62,6 +62,7 @@ async def validate(
     request: ValidateRequest,
     db: Session = Depends(get_db),
     client: PortfolioClient = Depends(get_portfolio_client),
+    _caller: TokenPayload = Depends(require_caller),
 ) -> RiskDecisionResponse:
     """Validate a TradeSignal -> RiskDecision (approved/rejected, sized).
 

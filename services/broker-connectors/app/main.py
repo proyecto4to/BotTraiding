@@ -33,7 +33,7 @@ from .credential_store import (
     EncryptedDbCredentialStore,
     build_credential_store,
 )
-from .deps import require_admin
+from .deps import require_admin, require_caller
 from .registry import CONNECTOR_CLASSES, registry
 
 SERVICE_NAME = "broker-connectors"
@@ -190,7 +190,9 @@ def rotate_credentials(
 
 
 @app.post("/connectors/{broker}/connect", response_model=ConnectResponse)
-async def connect(broker: str, body: ConnectRequest) -> ConnectResponse:
+async def connect(
+    broker: str, body: ConnectRequest, _caller=Depends(require_caller)
+) -> ConnectResponse:
     _require_known_broker(broker)
 
     credentials = BrokerCredentials(
@@ -302,7 +304,9 @@ def stream_status(broker: str, account_id: str = "default") -> StreamStatusRespo
 
 
 @app.post("/connectors/{broker}/orders", response_model=ExecutionReport)
-async def place_order(broker: str, body: PlaceOrderRequest) -> ExecutionReport:
+async def place_order(
+    broker: str, body: PlaceOrderRequest, _caller=Depends(require_caller)
+) -> ExecutionReport:
     _require_known_broker(broker)
     connector = _require_connected(broker, body.account_id)
     order = Order(
@@ -323,7 +327,10 @@ async def place_order(broker: str, body: PlaceOrderRequest) -> ExecutionReport:
 
 @app.post("/connectors/{broker}/orders/{order_id}/cancel", response_model=CancelOrderResponse)
 async def cancel_order(
-    broker: str, order_id: str, body: Optional[CancelOrderRequest] = None
+    broker: str,
+    order_id: str,
+    body: Optional[CancelOrderRequest] = None,
+    _caller=Depends(require_caller),
 ) -> CancelOrderResponse:
     """Cancel an order previously placed through this connector.
 

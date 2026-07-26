@@ -245,6 +245,15 @@ def trader_headers():
 
 
 @pytest.fixture()
+def service_headers():
+    """How the scheduler calls /autonomy/tick: an authenticated machine, with
+    no admin rights (the operator controls stay admin-only)."""
+    from trading_contracts.auth import service_auth_header
+
+    return service_auth_header("scheduler")
+
+
+@pytest.fixture()
 def client(fake_clients):
     from app.clients import get_clients
     from app.main import app

@@ -10,8 +10,18 @@ import pytest
 # per-test Redis registries are built explicitly in test_session_store.py.
 os.environ.pop("REDIS_URL", None)
 os.environ.pop("SESSION_STORE", None)
+# Signing key for the service tokens the order endpoints now require.
+os.environ.setdefault("JWT_SECRET", "test-secret")
 
 from app.registry import registry  # noqa: E402 - env scrub must run first
+from trading_contracts.auth import service_auth_header  # noqa: E402
+
+
+def service_headers(name: str = "execution-engine") -> dict[str, str]:
+    """Authorization header for a sibling service, the way execution-engine and
+    market-data call this one. Connect/place/cancel reject unauthenticated
+    callers, so API tests speak as a real internal caller."""
+    return service_auth_header(name)
 
 
 @pytest.fixture(autouse=True)

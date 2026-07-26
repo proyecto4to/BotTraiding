@@ -212,13 +212,13 @@ async def test_apply_failure_is_recorded_and_audited(fake_clients, monkeypatch):
 
 
 async def test_tick_runs_governor_and_endpoint_reports(
-    client, fake_clients, admin_headers, monkeypatch
+    client, fake_clients, admin_headers, service_headers, monkeypatch
 ):
     monkeypatch.setenv("AUTONOMY_GOVERNOR_MODE", "active")
     fake_clients.ai.recommendations_value = [_disable_rec()]
 
     assert client.post("/autonomy/enable", headers=admin_headers).status_code == 200
-    tick = client.post("/autonomy/tick")
+    tick = client.post("/autonomy/tick", headers=service_headers)
     assert tick.status_code == 200
     body = tick.json()
     assert any(
