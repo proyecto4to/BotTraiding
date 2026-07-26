@@ -14,10 +14,9 @@
 
 import {
   clearTokens,
+  csrfHeaders,
   getAccessToken,
-  getRefreshToken,
   setAccessToken,
-  setRefreshToken,
 } from "@/lib/token-store";
 import type { LoginResponse } from "@/lib/types";
 
@@ -96,19 +95,19 @@ function detailOf(body: unknown): unknown {
 let refreshInFlight: Promise<boolean> | null = null;
 
 async function doRefresh(): Promise<boolean> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return false;
+  // No token to send: the gateway reads the httpOnly refresh cookie the browser
+  // attaches to /api/session/*. `credentials: "include"` is what makes it do so
+  // cross-origin (dashboard :3000 -> gateway :8000).
   try {
-    const response = await fetch(buildUrl("/api/auth/refresh"), {
+    const response = await fetch(buildUrl("/api/session/refresh"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
     });
     if (!response.ok) return false;
     const body = (await parseBody(response)) as LoginResponse | null;
     if (!body?.access_token) return false;
     setAccessToken(body.access_token);
-    if (body.refresh_token) setRefreshToken(body.refresh_token);
     return true;
   } catch {
     return false;
@@ -134,9 +133,15 @@ async function rawFetch(
   const token = getAccessToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
+  // Session calls carry the CSRF echo; the gateway rejects them without it.
+  if (path.startsWith("/api/session/")) Object.assign(headers, csrfHeaders());
   return fetch(buildUrl(path, options.query), {
     method,
     headers,
+    // Needed so the browser stores the Set-Cookie from /api/session/login and
+    // replays it on refresh/logout. Harmless elsewhere: the refresh cookie is
+    // Path-scoped to /api/session, so ordinary /api/* calls never carry it.
+    credentials: "include",
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: options.signal,
   });
@@ -158,9 +163,13 @@ async function request<T>(
     throw apiError;
   }
 
-  // 401 → refresh once → retry once. Auth endpoints are exempt (a 401 there
-  // means bad credentials, not an expired access token).
-  if (response.status === 401 && !path.startsWith("/api/auth/")) {
+  // 401 → refresh once → retry once. Auth/session endpoints are exempt (a 401
+  // there means bad credentials or a dead session, not an expired access token).
+  if (
+    response.status === 401 &&
+    !path.startsWith("/api/auth/") &&
+    !path.startsWith("/api/session/")
+  ) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
       response = await rawFetch(method, path, body, options);

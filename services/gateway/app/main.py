@@ -18,7 +18,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app import market_config, proxy
+from app import market_config, proxy, session
 from app.audit import AuditMiddleware
 from app.deps import get_token_payload, require_admin
 
@@ -57,6 +57,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(market_config.router)
+# Session endpoints (BFF): the gateway keeps the refresh token in an httpOnly
+# cookie so the browser never holds it. Registered before the /api/{segment}
+# catch-all so /api/session/* is not forwarded to an upstream.
+app.include_router(session.router)
 # proxy.router (the /api/{segment} catch-all) is included LAST, at the end of
 # this module, so specific gateway-owned routes like /api/automation/* are
 # matched before the catch-all forwards them to an upstream.

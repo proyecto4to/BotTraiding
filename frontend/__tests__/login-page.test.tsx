@@ -32,11 +32,12 @@ describe("LoginPage", () => {
   it("renders the credentials form and switches to the TOTP step on mfa_required", async () => {
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/api/auth/login")) {
+      if (url.includes("/api/session/login")) {
         return Promise.resolve(
+          // No refresh_token in the body: the gateway keeps it in an httpOnly
+          // cookie, and an MFA challenge has no tokens yet anyway.
           jsonResponse(200, {
             access_token: null,
-            refresh_token: null,
             token_type: "bearer",
             mfa_required: true,
             mfa_pending_token: "pending-token-xyz",
@@ -68,9 +69,9 @@ describe("LoginPage", () => {
     });
     expect(screen.getByRole("button", { name: /verify code/i })).toBeInTheDocument();
 
-    // The login POST went through the gateway auth route.
+    // The login POST went through the gateway's session route (BFF).
     const loginCall = fetchMock.mock.calls.find((call) =>
-      String(call[0]).includes("/api/auth/login"),
+      String(call[0]).includes("/api/session/login"),
     );
     expect(loginCall).toBeDefined();
     expect(JSON.parse((loginCall![1] as RequestInit).body as string)).toEqual({

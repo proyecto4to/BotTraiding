@@ -2,8 +2,11 @@
 
 /**
  * Auth context: login (+ MFA/TOTP step), register, logout, session restore.
- * Access token lives in memory; the refresh token restores the session on
- * reload (see lib/token-store.ts for the httpOnly-cookie production TODO).
+ *
+ * The access token lives in memory only. The refresh token is never handled
+ * here at all: the gateway keeps it in an httpOnly cookie (/api/session/*), so
+ * restoring a session is just asking the gateway to refresh and letting the
+ * browser replay a cookie this code cannot read.
  */
 
 import {
@@ -22,7 +25,7 @@ import {
   isAdmin,
   type AuthState,
 } from "@/lib/auth-reducer";
-import { clearTokens, getRefreshToken, setAccessToken, setRefreshToken } from "@/lib/token-store";
+import { clearTokens, getCsrfToken, setAccessToken } from "@/lib/token-store";
 import type { LoginResponse, UserOut } from "@/lib/types";
 
 export interface AuthContextValue {
@@ -45,12 +48,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, initialAuthState);
   const booted = useRef(false);
 
-  // Restore session once on mount: refresh token -> access token -> /me.
+  // Restore session once on mount: refresh cookie -> access token -> /me.
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
     (async () => {
-      if (!getRefreshToken()) {
+      // The refresh cookie is httpOnly and unreadable, so the CSRF cookie is
+      // the only visible sign a session might exist. Skipping the round-trip
+      // without it just avoids a guaranteed 401 on every anonymous page load.
+      if (!getCsrfToken()) {
         dispatch({ type: "BOOT_DONE_ANONYMOUS" });
         return;
       }
@@ -80,8 +86,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const applyTokenPair = useCallback(async (tokens: LoginResponse) => {
+    // Only the access token comes back in the body; the refresh token went
+    // straight into the gateway's httpOnly cookie and never touches this code.
     setAccessToken(tokens.access_token);
-    setRefreshToken(tokens.refresh_token);
     const user = await fetchMe();
     dispatch({ type: "AUTHENTICATED", user });
   }, []);
@@ -96,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         : { username: identifier, password };
       try {
         const response = await api.post<LoginResponse>(
-          "/api/auth/login",
+          "/api/session/login",
           credentials,
           { silent: true },
         );
@@ -119,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SUBMIT" });
       try {
         const response = await api.post<LoginResponse>(
-          "/api/auth/login/mfa",
+          "/api/session/login/mfa",
           { mfa_pending_token: pending, code },
           { silent: true },
         );
@@ -138,14 +145,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    const refreshToken = getRefreshToken();
-    if (refreshToken) {
-      // Best-effort server-side revocation; local logout happens regardless.
-      try {
-        await api.post("/api/auth/logout", { refresh_token: refreshToken }, { silent: true });
-      } catch {
-        /* gateway down: still log out locally */
-      }
+    // The gateway revokes the refresh token upstream and clears the cookie —
+    // this code cannot delete an httpOnly cookie, which is the whole point.
+    try {
+      await api.post("/api/session/logout", undefined, { silent: true });
+    } catch {
+      /* gateway down: still drop the in-memory token and log out locally */
     }
     clearTokens();
     dispatch({ type: "LOGGED_OUT" });

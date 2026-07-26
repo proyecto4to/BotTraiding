@@ -144,6 +144,31 @@ max_exposure_per_symbol, max_exposure_per_sector, circuit_breaker_thresholds{}
   `127.0.0.1` (ver `infra/docker/docker-compose.yml`). Sostiene la sección 3 a
   nivel de red, pero es contención, no autorización — de ahí lo siguiente.
 
+### 8.1.1 Sesión del navegador (patrón BFF)
+
+El **refresh token nunca llega a JavaScript**. El gateway expone
+`/api/session/{login,login/mfa,refresh,logout}` y guarda el refresh en una
+cookie `httpOnly` con `Path=/api/session`, así que ni el código del dashboard
+puede leerla ni se envía al resto de la API. Antes vivía en `localStorage`: un
+XSS podía llevárselo y seguir emitiendo access tokens mucho después de cerrar
+la pestaña.
+
+El access token sigue viajando en el cuerpo y vive **solo en memoria**. Eso es
+lo que mantiene al resto de endpoints inmunes a CSRF por construcción: se
+autentican con una cabecera `Authorization` que el navegador nunca adjunta solo.
+
+Los endpoints de sesión son los únicos que el navegador autentica de forma
+automática, y llevan dos defensas independientes:
+
+1. `SameSite=Lax` — una petición cross-site no lleva la cookie.
+2. Doble submit — la cookie legible `tp_csrf` debe volver en `X-CSRF-Token`.
+   Una página atacante puede forzar la petición pero no leer nuestra cookie
+   para falsificar la cabecera. El token **no rota en cada refresh**: hacerlo
+   invalidaría el valor que lleve cualquier petición en vuelo.
+
+En producción hace falta `SESSION_COOKIE_SECURE=true` (y `SameSite=None` si el
+frontend está en otro sitio, que los navegadores solo aceptan junto a Secure).
+
 ### 8.2 Autenticación entre servicios
 
 Los servicios se llaman entre sí directamente (risk-engine → portfolio-engine,

@@ -111,10 +111,11 @@ Suma: **982 tests backend** (todos en verde) + **16 frontend**.
 - **Gate de coherencia con backtest**: implementado pero desactivado, porque
   nada alimenta todavía un baseline de backtest en `build_readiness`. Activarlo
   sin eso bloquearía la promoción a live para siempre en vez de endurecerla.
-- **Tokens httpOnly**: el access token vive solo en memoria, pero el refresh
-  sigue en `localStorage`; migrar a cookies httpOnly + CSRF.
 - **Revocación de access tokens**: `logout` revoca el refresh; el access sigue
   válido hasta expirar (15 min). Falta denylist si eso no basta.
+- **`SESSION_COOKIE_SECURE=true`** en producción: por defecto es `false` para
+  que la cookie de sesión funcione sobre http en local, pero sin él la cookie
+  viaja en claro fuera de localhost.
 - **OAuth real**: rellenar `GOOGLE_CLIENT_ID/SECRET` con credenciales reales.
 - **k8s productivo**: overlays con secrets reales, ingress/TLS, PodDisruption
   Budgets, y los puntos de estado de SCALABILITY.md (scheduler leader
