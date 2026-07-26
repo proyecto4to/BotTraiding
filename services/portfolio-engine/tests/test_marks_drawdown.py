@@ -68,3 +68,60 @@ def test_fresh_account_has_no_drawdown(client):
     assert dd["equity"] == pytest.approx(100000.0)
     assert dd["current_drawdown"] == pytest.approx(0.0)
     assert dd["floating_drawdown"] == pytest.approx(0.0)
+
+
+def test_max_drawdown_survives_a_recovery(client):
+    """A crash that recovers must still count: promoting to live on
+    current_drawdown alone would wave through a strategy that nearly blew up."""
+    _buy(client, "AAPL", 100, 100)
+    client.post(f"/portfolio/{ACC}/mark", json={"prices": {"AAPL": 110}})  # peak 101000
+
+    client.post(f"/portfolio/{ACC}/mark", json={"prices": {"AAPL": 60}})  # equity 96000
+    dd = client.get(f"/portfolio/{ACC}/drawdown").json()
+    worst = dd["max_drawdown"]
+    assert worst == pytest.approx((101000 - 96000) / 101000)
+
+    client.post(f"/portfolio/{ACC}/mark", json={"prices": {"AAPL": 110}})  # fully recovered
+    dd = client.get(f"/portfolio/{ACC}/drawdown").json()
+    assert dd["current_drawdown"] == pytest.approx(0.0)
+    assert dd["max_drawdown"] == pytest.approx(worst)
+
+
+def _sell(client, symbol, qty, price):
+    return client.post(
+        f"/portfolio/{ACC}/executions",
+        json={
+            "order_id": str(uuid.uuid4()),
+            "status": "filled",
+            "filled_quantity": qty,
+            "average_fill_price": price,
+            "broker": "sim",
+            "reported_at": datetime.now(timezone.utc).isoformat(),
+            "symbol": symbol,
+            "side": "sell",
+        },
+    )
+
+
+def test_opening_short_does_not_create_phantom_drawdown(client):
+    """Regression: a short credits its proceeds to cash, so equity computed
+    before the new position is visible counts the sale twice and inflates
+    peak_equity by the notional. That phantom drawdown feeds the platform
+    auto-halt and the paper->live promotion gate, so it must stay at zero."""
+    _sell(client, "BTCUSDT", 0.25, 100000)  # 25k short, no loss taken
+
+    dd = client.get(f"/portfolio/{ACC}/drawdown").json()
+    assert dd["equity"] == pytest.approx(100000.0)
+    assert dd["peak_equity"] == pytest.approx(100000.0)
+    assert dd["current_drawdown"] == pytest.approx(0.0)
+
+
+def test_opening_long_does_not_move_peak_equity(client):
+    """The mirror case: a buy debits cash, so a stale position set would
+    understate equity instead. Peak must stay at the starting capital."""
+    _buy(client, "AAPL", 100, 100)
+
+    dd = client.get(f"/portfolio/{ACC}/drawdown").json()
+    assert dd["equity"] == pytest.approx(100000.0)
+    assert dd["peak_equity"] == pytest.approx(100000.0)
+    assert dd["current_drawdown"] == pytest.approx(0.0)

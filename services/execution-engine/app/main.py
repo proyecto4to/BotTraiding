@@ -191,9 +191,16 @@ async def submit_execution(
             "the decision does not approve this order",
         )
 
-    # --- Mode gate: override of the env default is admin-only ------------
+    # --- Mode gate ---------------------------------------------------------
+    # Two independent rules, deliberately not merged:
+    #  1. LIVE always requires an admin, full stop. Deriving this from "differs
+    #     from the env default" meant that setting EXECUTION_MODE=live made the
+    #     comparison false and silently removed the admin gate on real money.
+    #  2. Any other departure from the configured default still needs an admin.
     actor: str | None = token.sub if token else None
-    if order.execution_mode != config.default_execution_mode():
+    if order.execution_mode == ExecutionMode.LIVE:
+        actor = require_admin_override(token).sub
+    elif order.execution_mode != config.default_execution_mode():
         actor = require_admin_override(token).sub
 
     if order.execution_mode == ExecutionMode.LIVE:

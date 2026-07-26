@@ -6,8 +6,13 @@ admin role and the given bcrypt hash. The plaintext password is never stored
 or read here — only its bcrypt hash, supplied via the environment.
 
 Security notes:
-- If the configured hash still matches the documented default password
-  (Viruheta), a prominent warning is logged recommending an immediate change.
+- No default credentials ship with the repo any more: both the username and the
+  hash come from the environment, and scripts/start-bottrading.ps1 generates a
+  random pair per machine into .local/ (gitignored). The legacy hash that used
+  to live in .env.example is treated as compromised — DEFAULT_OPERATOR_PASSWORD
+  below still detects it so a copy-pasted old config gets flagged loudly.
+- The stored hash is re-synced from the environment on every startup, so
+  rotating OPERATOR_PASSWORD_HASH is enough to retire an old password.
 - The operator logs in with the username, not an email; a synthetic
   `<username>@operator.local` email fills the required (unique) email column.
 """
@@ -74,7 +79,8 @@ def bootstrap_operator(db: Session) -> None:
 
     if security.verify_password(DEFAULT_OPERATOR_PASSWORD, password_hash):
         logger.warning(
-            "SECURITY: operator '%s' is using the DEFAULT password — change it "
-            "immediately from the panel (Seguridad) or via POST /auth/change_password",
+            "SECURITY: operator '%s' is using the old repo-published password — "
+            "it is public and must be changed NOW from the panel (Seguridad) or "
+            "via POST /auth/change_password",
             username,
         )

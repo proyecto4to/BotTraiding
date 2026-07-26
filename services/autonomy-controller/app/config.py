@@ -44,7 +44,16 @@ def http_timeout() -> float:
 
 # --- service identity (mints a JWT to call trading-engine) -------------------
 def jwt_secret() -> str:
-    return os.environ.get("JWT_SECRET", "dev-insecure-secret-change-me")
+    """The controller MINTS admin tokens with this (see clients.service_token),
+    so a default would let anyone who has read this repo forge one. No fallback:
+    fail loudly rather than sign with a public secret."""
+    secret = os.environ.get("JWT_SECRET", "").strip()
+    if not secret:
+        raise RuntimeError(
+            "JWT_SECRET is required and has no default. Generate one with: "
+            'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+        )
+    return secret
 
 
 def system_user_id() -> str:
@@ -162,23 +171,49 @@ def min_paper_days() -> float:
 
 
 def max_promote_drawdown() -> float:
-    """Max observed drawdown that still allows promotion. Default 20%."""
-    return float(os.environ.get("AUTONOMY_MAX_PROMOTE_DRAWDOWN", "0.20"))
+    """Max drawdown observed during the paper period that still allows
+    promotion. Default 10%, deliberately far below the 25% platform auto-halt:
+    a system that is already scraping the emergency brake has not earned real
+    money. Measured against the WORST drawdown of the period, not today's."""
+    return float(os.environ.get("AUTONOMY_MAX_PROMOTE_DRAWDOWN", "0.10"))
 
 
 def min_paper_return() -> float:
-    """Minimum total paper return to promote (default 0 = at least break-even)."""
-    return float(os.environ.get("AUTONOMY_MIN_PAPER_RETURN", "0.0"))
+    """Minimum total paper return to promote. Default 2%: breaking even proves
+    only that the system can avoid losing, which is not a reason to risk cash."""
+    return float(os.environ.get("AUTONOMY_MIN_PAPER_RETURN", "0.02"))
+
+
+def min_closed_trades() -> int:
+    """Minimum number of closed trades behind the track record (0 disables).
+
+    Without this, 14 days and three lucky trades read exactly like 14 days and
+    three hundred. Default 30 — roughly where per-trade noise stops dominating."""
+    return int(os.environ.get("AUTONOMY_MIN_CLOSED_TRADES", "30"))
 
 
 def min_sharpe() -> float | None:
-    """Optional minimum Sharpe gate (unset/empty disables it)."""
-    raw = os.environ.get("AUTONOMY_MIN_SHARPE", "").strip()
+    """Minimum per-trade Sharpe to promote (empty string disables it).
+
+    ON by default: it is the only gate that asks whether the profit was worth
+    the swings taken to get it. The metric is portfolio-engine's `trade_sharpe`
+    (mean realized PnL / its stdev across closed trades), NOT an annualised
+    Sharpe -- 0.15 is a deliberately modest bar on that scale. Missing metric
+    (fewer than 2 closed trades) fails the gate closed."""
+    raw = os.environ.get("AUTONOMY_MIN_SHARPE", "0.15").strip()
     return float(raw) if raw else None
 
 
 def backtest_coherence_tolerance() -> float | None:
-    """Optional paper-vs-backtest coherence gate (unset/empty disables it)."""
+    """Paper-vs-backtest coherence gate (empty string disables it).
+
+    OFF by default, and deliberately so: nothing currently feeds a backtest
+    baseline into build_readiness, so switching it on would not make promotion
+    stricter -- it would make it permanently impossible, and the first person
+    hitting that wall would just disable it. Turn it on together with wiring
+    `backtest_return` in controller.build_readiness (a per-strategy baseline
+    from the backtester); until then this stays an explicit, documented gap
+    rather than a gate that always fails."""
     raw = os.environ.get("AUTONOMY_BACKTEST_COHERENCE", "").strip()
     return float(raw) if raw else None
 

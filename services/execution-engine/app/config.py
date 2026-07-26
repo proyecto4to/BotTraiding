@@ -5,9 +5,10 @@ per case and operators can tune without code changes.
 
 Env vars:
 - EXECUTION_MODE: default execution mode ("paper"|"live", default "paper").
-  Per-request override (an order whose execution_mode differs from this
-  default) requires an admin JWT.
-- EXECUTION_LIVE_ENABLED: register the live transport at all (default true).
+  Any request for live requires an admin JWT, regardless of this default --
+  setting EXECUTION_MODE=live must not silently drop the admin gate.
+- EXECUTION_LIVE_ENABLED: register the live transport at all (default FALSE).
+  Live therefore needs two deliberate switches, not one.
 - EXECUTION_MAX_CHILD_SIZE: orders larger than this are split into
   sequentially executed child orders (0 = no splitting, default 0).
 - EXECUTION_RETRY_MAX_ATTEMPTS / _BASE_DELAY / _MAX_DELAY / _JITTER:
@@ -34,7 +35,9 @@ def default_execution_mode() -> ExecutionMode:
 
 
 def live_enabled() -> bool:
-    return os.environ.get("EXECUTION_LIVE_ENABLED", "true").lower() in ("1", "true", "yes")
+    """Whether the live transport is registered at all. Defaults to FALSE:
+    reaching real money should take a deliberate act, not the absence of one."""
+    return os.environ.get("EXECUTION_LIVE_ENABLED", "false").lower() in ("1", "true", "yes")
 
 
 def max_child_size() -> float:

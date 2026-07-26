@@ -73,6 +73,9 @@ class DrawdownReport(BaseModel):
     equity: float = 0.0
     peak_equity: float = 0.0
     current_drawdown: float = 0.0
+    # Worst drawdown ever observed (never decreases). The paper->live gate uses
+    # this, not current_drawdown, so a recovered crash still counts against it.
+    max_drawdown: float = 0.0
     floating_drawdown: float = 0.0
 
 
@@ -88,6 +91,12 @@ class PortfolioState(BaseModel):
     drawdown: DrawdownReport
     realized_pnl: float = 0.0
     unrealized_pnl: float = 0.0
+    # Completed round trips (executions that realized PnL). The paper->live gate
+    # uses it to tell a real track record from a handful of lucky fills.
+    closed_trades: int = 0
+    # Per-trade Sharpe (mean realized PnL / its stdev). None when there are too
+    # few trades to be meaningful, which makes the promotion gate fail closed.
+    trade_sharpe: float | None = None
     pnl_daily: float = 0.0
     pnl_weekly: float = 0.0
     pnl_monthly: float = 0.0

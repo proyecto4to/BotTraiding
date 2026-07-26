@@ -16,8 +16,9 @@ from . import config
 @dataclass
 class PromotionSnapshot:
     paper_days: float = 0.0
-    drawdown: float = 0.0          # observed drawdown from peak (fraction)
+    drawdown: float = 0.0          # WORST drawdown of the paper period (fraction)
     total_return: float = 0.0      # (equity - starting) / starting
+    closed_trades: int = 0         # completed round trips behind the record
     sharpe: float | None = None
     paper_return: float | None = None      # for backtest coherence
     backtest_return: float | None = None
@@ -42,12 +43,14 @@ def evaluate_gates(
     min_days: float | None = None,
     max_dd: float | None = None,
     min_return: float | None = None,
+    min_trades: int | None = None,
     min_sharpe: float | None = None,
     coherence_tol: float | None = None,
 ) -> GateReport:
     min_days = min_days if min_days is not None else config.min_paper_days()
     max_dd = max_dd if max_dd is not None else config.max_promote_drawdown()
     min_return = min_return if min_return is not None else config.min_paper_return()
+    min_trades = min_trades if min_trades is not None else config.min_closed_trades()
     if min_sharpe is None:
         min_sharpe = config.min_sharpe()
     if coherence_tol is None:
@@ -62,7 +65,7 @@ def evaluate_gates(
         GateResult(
             "max_drawdown",
             snap.drawdown <= max_dd,
-            f"drawdown {snap.drawdown:.2%} vs {max_dd:.2%} allowed",
+            f"worst drawdown {snap.drawdown:.2%} vs {max_dd:.2%} allowed",
         ),
         GateResult(
             "min_return",
@@ -70,6 +73,15 @@ def evaluate_gates(
             f"return {snap.total_return:.2%} vs {min_return:.2%} required",
         ),
     ]
+
+    if min_trades > 0:
+        gates.append(
+            GateResult(
+                "min_closed_trades",
+                snap.closed_trades >= min_trades,
+                f"{snap.closed_trades} closed trades vs {min_trades} required",
+            )
+        )
 
     # Optional gates: when a threshold is configured but the metric is missing,
     # the gate FAILS (conservative — never promote to live without the proof).

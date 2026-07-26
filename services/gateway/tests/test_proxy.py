@@ -58,6 +58,40 @@ def test_authenticated_request_is_forwarded_with_identity_headers(client) -> Non
 
 
 @respx.mock
+def test_client_supplied_identity_headers_are_stripped_on_public_routes(client) -> None:
+    """/api/auth/* verifies no token, so nothing overwrites the identity headers.
+    They must be dropped from the incoming request, or a caller could simply
+    declare itself admin to whatever upstream later decides to trust them."""
+    route = respx.post("http://auth-service:8000/auth/login").mock(
+        return_value=httpx.Response(200, json={"access_token": "abc"})
+    )
+    response = client.post(
+        "/api/auth/login",
+        json={"email": "a@b.c", "password": "pw"},
+        headers={"X-User-Id": "somebody-else", "X-User-Roles": "admin"},
+    )
+    assert response.status_code == 200
+    sent = route.calls.last.request
+    assert "x-user-id" not in sent.headers
+    assert "x-user-roles" not in sent.headers
+
+
+@respx.mock
+def test_client_cannot_override_identity_on_authenticated_routes(client) -> None:
+    """On authenticated routes the spoofed values must lose to the token's."""
+    route = respx.get("http://strategy-engine:8000/strategies/list").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    headers = auth_headers(sub="user-42", roles=["viewer"])
+    headers.update({"X-User-Id": "attacker", "X-User-Roles": "admin"})
+    response = client.get("/api/strategies/list", headers=headers)
+    assert response.status_code == 200
+    sent = route.calls.last.request
+    assert sent.headers["x-user-id"] == "user-42"
+    assert sent.headers["x-user-roles"] == "viewer"
+
+
+@respx.mock
 def test_query_params_and_method_forwarded(client) -> None:
     route = respx.delete("http://risk-engine:8000/risk/limits/abc").mock(
         return_value=httpx.Response(204)

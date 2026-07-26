@@ -130,9 +130,31 @@ max_exposure_per_symbol, max_exposure_per_sector, circuit_breaker_thresholds{}
 ## 8. Seguridad
 
 - MFA en `auth-service`; JWT de corta duración + refresh token.
+- `JWT_SECRET` no tiene valor por defecto en ningún sitio: los servicios que
+  *firman* tokens (auth-service, autonomy-controller) fallan al arrancar sin él.
+  Un default en código sería una llave de administrador publicada en el repo.
 - Credenciales de broker cifradas at-rest (KMS/Vault-ready, stub en Fase 1).
 - RBAC: roles `admin`, `trader`, `viewer`, `auditor`.
 - Todo endpoint del gateway pasa por middleware de auditoría.
+- La identidad (`X-User-Id` / `X-User-Roles`) la genera el gateway a partir de
+  un token verificado y **siempre se borra** de la petición entrante: nunca se
+  acepta del cliente.
+- **Perímetro de red**: solo el gateway y el frontend escuchan fuera de
+  loopback; el resto de servicios y la infraestructura están atados a
+  `127.0.0.1` (ver `infra/docker/docker-compose.yml`). Esto sostiene la sección
+  3 a nivel de red, pero es contención, no autorización — varios endpoints
+  internos de escritura siguen sin pedir token y eso está pendiente (ver README,
+  "Qué falta para producción").
+
+### 8.1 Progresión a dinero real
+
+Tres salvaguardas independientes, ninguna suficiente por sí sola:
+
+1. `EXECUTION_LIVE_ENABLED` (default `false`) registra o no el transporte live.
+2. Toda orden `live` exige un JWT con rol `admin`, sea cual sea `EXECUTION_MODE`.
+3. `autonomy-controller` solo pasa a `TRADING_LIVE` si superan **todos** los
+   gates de promoción, y el guard global de riesgo pasa a fail-closed en live
+   (si `portfolio-engine` no responde, se detiene la automatización).
 
 ## 9. Estándares de código y pruebas (aplican desde Fase 1)
 

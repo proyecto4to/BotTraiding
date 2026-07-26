@@ -16,18 +16,54 @@ foreach ($d in @($logsDir, $localDir)) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
 
+# --- Secretos locales ---------------------------------------------------------
+# Ningun secreto vive en este fichero: esta versionado, asi que cualquier valor
+# aqui seria publico, y con el JWT_SECRET se firman tokens de administrador.
+# En su lugar se generan una sola vez por maquina y se guardan en .local/
+# (gitignored). Para rotarlos: borra .local\dev-secrets.ps1 y vuelve a arrancar.
+$secretsFile = Join-Path $localDir 'dev-secrets.ps1'
+if (-not (Test-Path $secretsFile)) {
+    Write-Host 'Generando secretos locales (primera vez)...' -ForegroundColor Yellow
+    $jwt = & $globalPython -c "import secrets; print(secrets.token_urlsafe(48))"
+    $pwd = & $globalPython -c "import secrets; print(secrets.token_urlsafe(12))"
+    $hash = & $globalPython -c "import bcrypt,sys; print(bcrypt.hashpw(sys.argv[1].encode(), bcrypt.gensalt()).decode())" $pwd
+    if ($LASTEXITCODE -ne 0 -or -not $hash) {
+        throw "No se pudo generar el hash bcrypt. Instala bcrypt: $globalPython -m pip install bcrypt"
+    }
+    # Se mantiene el usuario BlasJon a proposito: auth-service resincroniza el
+    # hash en cada arranque, asi que la contrasena antigua (que estaba
+    # versionada, y por tanto es publica) queda sobrescrita. Cambiar de usuario
+    # dejaria la cuenta vieja viva con su contrasena conocida.
+    @"
+# Secretos de desarrollo de esta maquina. NO se versiona (.local/ esta en
+# .gitignore). Borra este fichero para regenerarlos.
+`$env:JWT_SECRET = '$jwt'
+`$env:OPERATOR_USERNAME = 'BlasJon'
+`$env:OPERATOR_PASSWORD_HASH = '$hash'
+"@ | Set-Content -Path $secretsFile -Encoding UTF8
+
+    $credFile = Join-Path $localDir 'CREDENCIALES.txt'
+    @"
+Acceso al panel de BotTrading (solo esta maquina)
+usuario:    BlasJon
+contrasena: $pwd
+
+Generado el $(Get-Date -Format 'yyyy-MM-dd HH:mm'). Sustituye a la contrasena
+anterior, que estaba en el repositorio y por tanto ya no era secreta.
+Cambiala desde el panel > Seguridad. Si borras .local\dev-secrets.ps1 se
+genera una nueva en el siguiente arranque.
+"@ | Set-Content -Path $credFile -Encoding UTF8
+
+    Write-Host "  Usuario: BlasJon   Contrasena: $pwd" -ForegroundColor Green
+    Write-Host "  (guardada tambien en $credFile)" -ForegroundColor Green
+}
+. $secretsFile
+
 # --- Entorno comun -----------------------------------------------------------
 $env:Path = "C:\Program Files\nodejs;$env:Path"
-# Auth firma con este valor por defecto; el gateway y demas servicios NECESITAN
-# la variable definida para verificar tokens.
-if (-not $env:JWT_SECRET) { $env:JWT_SECRET = 'dev-insecure-secret-change-me' }
 # El primer usuario que se registre con este email recibe rol admin
 # (solo si aun no existe ningun admin).
 if (-not $env:AUTH_BOOTSTRAP_ADMIN_EMAIL) { $env:AUTH_BOOTSTRAP_ADMIN_EMAIL = 'proyecto4toano@gmail.com' }
-# Operador unico del panel: BlasJon / Viruheta (hash bcrypt; cambiala desde el
-# panel > Seguridad). auth-service lo crea al arrancar si no existe.
-if (-not $env:OPERATOR_USERNAME) { $env:OPERATOR_USERNAME = 'BlasJon' }
-if (-not $env:OPERATOR_PASSWORD_HASH) { $env:OPERATOR_PASSWORD_HASH = '$2b$12$CMYf0XnhcFmiW504P68l6eBxVzJrXrJvRTmP5Mbaxkr/LNceL.1Zm' }
 $env:CORS_ORIGINS = 'http://localhost:3000,http://127.0.0.1:3000'
 $env:EXECUTION_MODE = 'paper'
 # Datos de mercado sinteticos: el bot funciona directo, sin credenciales de
@@ -101,8 +137,16 @@ foreach ($svc in $services) {
 
     $out = Join-Path $logsDir "$name.log"
     $errLog = Join-Path $logsDir "$name.err.log"
+    # Los servicios internos escuchan SOLO en loopback: varios endpoints de
+    # escritura no piden token (colocar orden en broker-connectors, ingesta de
+    # portfolio...), asi que exponerlos a la red local seria una via directa
+    # para operar saltandose el risk-engine.
+    # El gateway es la unica puerta de entrada y si autentica, asi que puede
+    # exponerse a proposito (p.ej. para abrir el panel desde el movil):
+    #   $env:GATEWAY_BIND = '0.0.0.0'  antes de lanzar este script.
+    $bind = if ($name -eq 'gateway' -and $env:GATEWAY_BIND) { $env:GATEWAY_BIND } else { '127.0.0.1' }
     Start-Process -FilePath $python -WorkingDirectory $svcDir `
-        -ArgumentList "-m uvicorn app.main:app --host 0.0.0.0 --port $port" `
+        -ArgumentList "-m uvicorn app.main:app --host $bind --port $port" `
         -RedirectStandardOutput $out -RedirectStandardError $errLog -NoNewWindow | Out-Null
     Write-Host "Iniciado $name en :$port"
 }

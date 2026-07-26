@@ -143,24 +143,44 @@ class FakePortfolio:
     """Aggregate risk snapshot for the risk guard (P9) and promotion gates (P18)."""
 
     def __init__(
-        self, drawdown=0.0, pnl_daily=0.0, equity=100000.0, realized=0.0, unrealized=0.0
+        self,
+        drawdown=0.0,
+        pnl_daily=0.0,
+        equity=100000.0,
+        realized=0.0,
+        unrealized=0.0,
+        max_drawdown=None,
+        closed_trades=100,
+        trade_sharpe=1.0,
     ) -> None:
         self.drawdown = drawdown
         self.pnl_daily = pnl_daily
         self.equity = equity
         self.realized = realized
         self.unrealized = unrealized
+        # Worst drawdown of the period; defaults to the current one so a test
+        # that only sets `drawdown` still describes one coherent account.
+        self.max_drawdown = max_drawdown
+        # Comfortably above the min_closed_trades gate by default, so a test is
+        # never accidentally measuring that gate; lower it to exercise it.
+        self.closed_trades = closed_trades
+        # Per-trade Sharpe, comfortably above the default gate; set to None to
+        # exercise the "metric unavailable => fail closed" path.
+        self.trade_sharpe = trade_sharpe
         self.fail = False
 
     async def get_state(self, account_id):
         if self.fail:
             raise DownstreamError("portfolio down")
+        worst = self.max_drawdown if self.max_drawdown is not None else self.drawdown
         return {
             "account": {"equity": self.equity},
-            "drawdown": {"current_drawdown": self.drawdown},
+            "drawdown": {"current_drawdown": self.drawdown, "max_drawdown": worst},
             "pnl_daily": self.pnl_daily,
             "realized_pnl": self.realized,
             "unrealized_pnl": self.unrealized,
+            "closed_trades": self.closed_trades,
+            "trade_sharpe": self.trade_sharpe,
         }
 
 

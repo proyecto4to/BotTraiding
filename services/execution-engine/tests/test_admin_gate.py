@@ -59,16 +59,30 @@ def test_refresh_token_rejected_401(harness):
     assert response.status_code == 401
 
 
-def test_live_default_env_needs_no_override(harness, monkeypatch, caplog):
-    # Deployment explicitly configured EXECUTION_MODE=live: a live order is
-    # not an override, but it is still audited with a warning.
+def test_live_still_requires_admin_when_it_is_the_env_default(harness, monkeypatch):
+    """Regression: the admin gate used to fire only when the requested mode
+    DIFFERED from EXECUTION_MODE. Configuring EXECUTION_MODE=live therefore made
+    the comparison false and let unauthenticated live orders through — the one
+    configuration where the gate matters most. Live is admin-only, full stop."""
+    monkeypatch.setenv("EXECUTION_MODE", "live")
+
+    response = harness.client.post("/executions", json=make_execution_payload(mode="live"))
+    assert response.status_code == 401
+    assert harness.live.orders == []
+
+
+def test_live_as_env_default_still_works_for_an_admin(harness, monkeypatch, admin_headers, caplog):
     monkeypatch.setenv("EXECUTION_MODE", "live")
     with caplog.at_level(logging.WARNING, logger="execution-engine"):
-        response = harness.client.post("/executions", json=make_execution_payload(mode="live"))
+        response = harness.client.post(
+            "/executions", json=make_execution_payload(mode="live"), headers=admin_headers
+        )
     assert response.status_code == 201
     assert len(harness.live.orders) == 1
     assert "live_execution" in caplog.text
 
-    # ...and now *paper* is the override, requiring admin.
+
+def test_paper_is_an_override_when_live_is_the_default(harness, monkeypatch):
+    monkeypatch.setenv("EXECUTION_MODE", "live")
     response = harness.client.post("/executions", json=make_execution_payload(mode="paper"))
     assert response.status_code == 401

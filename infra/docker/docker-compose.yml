@@ -13,6 +13,16 @@
 # Tunables use ${VAR:-default}: override them in infra/docker/.env without
 # editing this file. JWT_SECRET has no default on purpose - it must be shared
 # by auth-service, gateway, risk-engine, execution-engine and scheduler.
+#
+# Port bindings: only the gateway (8000) and the frontend (3000) listen on all
+# interfaces - they are the intended entry points and they authenticate. Every
+# other service, plus postgres/redis/nats/grafana/prometheus, is bound to
+# 127.0.0.1 so it stays reachable for local debugging but is NOT exposed to the
+# LAN. Internal services still reach each other by service name on the compose
+# network, which the loopback binding does not affect. This enforces
+# ARCHITECTURE.md section 3 ("clients never call an internal service directly")
+# at the network layer: several internal write endpoints do not authenticate,
+# so publishing them was a direct path to placing orders around the risk engine.
 
 services:
   postgres:
@@ -22,7 +32,7 @@ services:
       POSTGRES_PASSWORD: trading
       POSTGRES_DB: tradingplatform
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -35,7 +45,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -46,13 +56,13 @@ services:
     image: nats:2.10-alpine
     command: ["-js"]
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
 
   loki:
     image: grafana/loki:2.9.6
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     command: ["-config.file=/etc/loki/local-config.yaml"]
 
   promtail:
@@ -69,14 +79,14 @@ services:
   prometheus:
     image: prom/prometheus:v2.53.0
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
 
   grafana:
     image: grafana/grafana:11.1.0
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     volumes:
@@ -129,7 +139,7 @@ services:
       context: ../..
       dockerfile: services/auth-service/Dockerfile
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     environment:
       SERVICE_NAME: auth-service
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -161,7 +171,7 @@ services:
       context: ../..
       dockerfile: services/strategy-engine/Dockerfile
     ports:
-      - "8002:8000"
+      - "127.0.0.1:8002:8000"
     environment:
       SERVICE_NAME: strategy-engine
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -180,7 +190,7 @@ services:
       context: ../..
       dockerfile: services/risk-engine/Dockerfile
     ports:
-      - "8003:8000"
+      - "127.0.0.1:8003:8000"
     environment:
       SERVICE_NAME: risk-engine
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -205,7 +215,7 @@ services:
       context: ../..
       dockerfile: services/portfolio-engine/Dockerfile
     ports:
-      - "8004:8000"
+      - "127.0.0.1:8004:8000"
     environment:
       SERVICE_NAME: portfolio-engine
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -226,7 +236,7 @@ services:
       context: ../..
       dockerfile: services/ai-engine/Dockerfile
     ports:
-      - "8005:8000"
+      - "127.0.0.1:8005:8000"
     environment:
       SERVICE_NAME: ai-engine
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -249,7 +259,7 @@ services:
       context: ../..
       dockerfile: services/execution-engine/Dockerfile
     ports:
-      - "8006:8000"
+      - "127.0.0.1:8006:8000"
     environment:
       SERVICE_NAME: execution-engine
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -289,7 +299,7 @@ services:
       context: ../..
       dockerfile: services/broker-connectors/Dockerfile
     ports:
-      - "8007:8000"
+      - "127.0.0.1:8007:8000"
     environment:
       SERVICE_NAME: broker-connectors
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -315,7 +325,7 @@ services:
       context: ../..
       dockerfile: services/autonomy-controller/Dockerfile
     ports:
-      - "8015:8000"
+      - "127.0.0.1:8015:8000"
     environment:
       SERVICE_NAME: autonomy-controller
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -367,7 +377,7 @@ services:
       context: ../..
       dockerfile: services/market-data/Dockerfile
     ports:
-      - "8014:8000"
+      - "127.0.0.1:8014:8000"
     environment:
       SERVICE_NAME: market-data
       REDIS_URL: redis://redis:6379/0
@@ -390,7 +400,7 @@ services:
       context: ../..
       dockerfile: services/backtester/Dockerfile
     ports:
-      - "8008:8000"
+      - "127.0.0.1:8008:8000"
     environment:
       SERVICE_NAME: backtester
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -410,7 +420,7 @@ services:
       context: ../..
       dockerfile: services/optimizer/Dockerfile
     ports:
-      - "8009:8000"
+      - "127.0.0.1:8009:8000"
     environment:
       SERVICE_NAME: optimizer
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -439,7 +449,7 @@ services:
       context: ../..
       dockerfile: services/paper-trading/Dockerfile
     ports:
-      - "8010:8000"
+      - "127.0.0.1:8010:8000"
     environment:
       SERVICE_NAME: paper-trading
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -467,7 +477,7 @@ services:
       context: ../..
       dockerfile: services/notification-service/Dockerfile
     ports:
-      - "8011:8000"
+      - "127.0.0.1:8011:8000"
     environment:
       SERVICE_NAME: notification-service
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -497,7 +507,7 @@ services:
       context: ../..
       dockerfile: services/scheduler/Dockerfile
     ports:
-      - "8012:8000"
+      - "127.0.0.1:8012:8000"
     environment:
       SERVICE_NAME: scheduler
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform
@@ -527,7 +537,7 @@ services:
       context: ../..
       dockerfile: services/trading-engine/Dockerfile
     ports:
-      - "8013:8000"
+      - "127.0.0.1:8013:8000"
     environment:
       SERVICE_NAME: trading-engine
       DATABASE_URL: postgresql://trading:trading@postgres:5432/tradingplatform

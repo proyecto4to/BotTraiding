@@ -46,6 +46,11 @@ class PortfolioAccount(Base):
     cash: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     realized_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     peak_equity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # Worst drawdown ever observed, as a fraction of the peak. current_drawdown
+    # only says where the account stands right now, so a strategy that fell 40%
+    # and recovered would look spotless to the paper->live promotion gate. This
+    # is the high-water mark of pain and never decreases.
+    max_drawdown: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     base_currency: Mapped[str] = mapped_column(String(10), nullable=False, default="USD")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

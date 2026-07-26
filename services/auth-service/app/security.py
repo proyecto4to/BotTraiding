@@ -16,7 +16,20 @@ from passlib.context import CryptContext
 
 from trading_contracts.auth import ALGORITHM
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "dev-insecure-secret-change-me")
+def _require_jwt_secret() -> str:
+    """auth-service SIGNS the tokens every other service trusts, so a fallback
+    default would mean anyone who has read this repo can mint an admin token.
+    Fail at startup instead of silently signing with a public secret."""
+    secret = os.environ.get("JWT_SECRET", "").strip()
+    if not secret:
+        raise RuntimeError(
+            "JWT_SECRET is required and has no default. Generate one with: "
+            'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+        )
+    return secret
+
+
+JWT_SECRET = _require_jwt_secret()
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 MFA_PENDING_TOKEN_EXPIRE_MINUTES = int(

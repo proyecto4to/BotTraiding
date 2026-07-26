@@ -8,8 +8,10 @@ cualquier servicio. Cómo escala (y qué falta para escalar más) está en
 [`docs/SCALABILITY.md`](docs/SCALABILITY.md).
 
 **Estado: Fases 0–15 implementadas** (ver tabla más abajo). Todo el flujo
-señal → riesgo → portafolio → ejecución funciona en modo paper; el modo live
-existe detrás de un gate de administrador y queda apagado por defecto.
+señal → riesgo → portafolio → ejecución funciona en modo paper. El modo live
+está apagado por defecto y necesita tres cosas independientes para activarse:
+`EXECUTION_LIVE_ENABLED=true` (default `false`), un JWT de administrador en
+cada orden live, y superar todos los gates de promoción paper→live.
 
 ## Repo layout
 
@@ -97,18 +99,27 @@ Frontend: `cd frontend && npm install && npm run dev` (set
 | 14 | Monitoreo: `/metrics` en los 14 servicios, Prometheus, Grafana provisionado, promtail→Loki | ✅ | — |
 | 15 | Escalabilidad: resources/limits, HPAs, `docs/SCALABILITY.md` | ✅ | — |
 
-Suma: **613 tests backend** (todos en verde) + **16 frontend**.
+Suma: **982 tests backend** (todos en verde) + **16 frontend**.
 
 ## Qué falta para producción
 
-- **Credenciales reales de broker**: los conectores apuntan a URLs demo y el
-  credential store es in-memory — falta Vault/KMS y persistencia cifrada.
+- **Autenticación entre servicios**: los servicios internos exponen endpoints de
+  escritura sin token (colocar orden en broker-connectors, ingesta de portfolio,
+  `/risk/validate`). Hoy se contienen por red — solo el gateway y el frontend
+  escuchan fuera de loopback — pero el perímetro no es autorización: falta un
+  token de servicio como el que ya usa autonomy-controller para trading-engine.
+- **Credenciales reales de broker**: los conectores apuntan a URLs demo. El
+  credential store cifrado (Fernet, `CREDENTIAL_STORE=db`) ya existe pero el
+  default sigue siendo `memory`; falta Vault/KMS para las claves.
 - **Streaming**: market data por websocket (hoy `stream_market_data` es
   polling) y push de fills al frontend (hoy la UI hace polling).
-- **Rate limiting en Redis**: el token bucket del gateway es por proceso;
-  con más de una réplica el límite efectivo se multiplica (ver SCALABILITY.md).
-- **Tokens httpOnly**: el frontend guarda JWTs en localStorage; migrar a
-  cookies httpOnly + CSRF.
+- **Gate de coherencia con backtest**: implementado pero desactivado, porque
+  nada alimenta todavía un baseline de backtest en `build_readiness`. Activarlo
+  sin eso bloquearía la promoción a live para siempre en vez de endurecerla.
+- **Tokens httpOnly**: el access token vive solo en memoria, pero el refresh
+  sigue en `localStorage`; migrar a cookies httpOnly + CSRF.
+- **Revocación de access tokens**: `logout` revoca el refresh; el access sigue
+  válido hasta expirar (15 min). Falta denylist si eso no basta.
 - **OAuth real**: rellenar `GOOGLE_CLIENT_ID/SECRET` con credenciales reales.
 - **k8s productivo**: overlays con secrets reales, ingress/TLS, PodDisruption
   Budgets, y los puntos de estado de SCALABILITY.md (scheduler leader

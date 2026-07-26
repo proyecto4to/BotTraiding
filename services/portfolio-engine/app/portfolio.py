@@ -22,7 +22,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import PortfolioAccount, PortfolioExecution, PortfolioPosition
@@ -266,6 +266,13 @@ def apply_mark(db: Session, account_id: str, mark: MarkRequest) -> PortfolioStat
 
 
 def _equity(db: Session, account: PortfolioAccount) -> float:
+    # The session runs with autoflush=False, so a position added earlier in the
+    # same request is invisible to the SELECT below until it is flushed. Equity
+    # would then be computed as cash alone -- and a short sale has already
+    # credited its proceeds to cash, inflating equity by the position notional
+    # and permanently corrupting peak_equity/drawdown. Flush first so equity is
+    # always measured against the full position set.
+    db.flush()
     positions = _open_positions(db, account.account_id)
     market_value = sum(p.quantity * _mark_for(account.account_id, p) for p in positions)
     return account.cash + market_value
@@ -275,6 +282,50 @@ def _update_peak_equity(db: Session, account: PortfolioAccount) -> None:
     equity = _equity(db, account)
     if equity > account.peak_equity:
         account.peak_equity = equity
+
+
+def _closed_trades(db: Session, account_id: str) -> int:
+    """Completed round trips: executions that realized PnL, i.e. reduced or
+    closed a position. Opening fills realize nothing and are not counted.
+
+    This is what tells a track record built on 300 trades apart from one built
+    on 3 lucky ones, which the paper->live gate needs to know."""
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(PortfolioExecution)
+            .where(
+                PortfolioExecution.account_id == account_id,
+                PortfolioExecution.realized_pnl != 0,
+            )
+        )
+        or 0
+    )
+
+
+def _trade_sharpe(db: Session, account_id: str) -> float | None:
+    """Risk-adjusted quality of the closed trades: mean realized PnL divided by
+    its standard deviation (a per-trade Sharpe, not annualised).
+
+    Answers the question the return alone cannot: was the profit worth the
+    swings taken to get it. None when there are too few trades to say, so the
+    promotion gate fails closed rather than trusting a number built on noise.
+    """
+    pnls = list(
+        db.scalars(
+            select(PortfolioExecution.realized_pnl).where(
+                PortfolioExecution.account_id == account_id,
+                PortfolioExecution.realized_pnl != 0,
+            )
+        )
+    )
+    if len(pnls) < 2:
+        return None
+    values = np.asarray(pnls, dtype=float)
+    spread = float(values.std(ddof=1))
+    if spread == 0.0:
+        return None
+    return float(values.mean() / spread)
 
 
 def _period_realized(db: Session, account_id: str, since: datetime) -> float:
@@ -358,6 +409,14 @@ def build_drawdown(db: Session, account_id: str) -> DrawdownReport:
     peak = max(account.peak_equity, equity)
     current_dd = ((peak - equity) / peak) if peak > 0 else 0.0
 
+    # Ratchet the worst drawdown ever seen. Reading the report is what samples
+    # it, which is enough: risk-engine and the autonomy guard poll this on every
+    # cycle, so a dip between two polls of a live account is not missed in
+    # practice, and the value can only ever go up.
+    if current_dd > account.max_drawdown:
+        account.max_drawdown = current_dd
+        db.commit()
+
     positions = _open_positions(db, account_id)
     unrealized = sum(
         p.quantity * (_mark_for(account_id, p) - p.average_price) for p in positions
@@ -371,6 +430,7 @@ def build_drawdown(db: Session, account_id: str) -> DrawdownReport:
         equity=equity,
         peak_equity=peak,
         current_drawdown=current_dd,
+        max_drawdown=account.max_drawdown,
         floating_drawdown=floating_dd,
     )
 
@@ -420,6 +480,8 @@ def build_state(db: Session, account_id: str) -> PortfolioState:
         drawdown=drawdown,
         realized_pnl=account.realized_pnl,
         unrealized_pnl=unrealized,
+        closed_trades=_closed_trades(db, account_id),
+        trade_sharpe=_trade_sharpe(db, account_id),
         pnl_daily=_period_realized(db, account_id, day_start),
         pnl_weekly=_period_realized(db, account_id, week_start),
         pnl_monthly=_period_realized(db, account_id, month_start),

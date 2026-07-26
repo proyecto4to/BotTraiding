@@ -69,11 +69,24 @@ async def build_readiness(db: Session, clients: Clients) -> gates.GateReport:
     starting = equity - realized - unrealized
     total_return = ((realized + unrealized) / starting) if starting > 0 else 0.0
 
+    # The WORST drawdown of the paper period, not today's: a strategy that fell
+    # 40% and recovered must not present itself as unblemished.
+    drawdown_report = state.get("drawdown") or {}
+    worst_drawdown = float(
+        drawdown_report.get("max_drawdown", drawdown_report.get("current_drawdown", 0.0)) or 0.0
+    )
+
+    sharpe = state.get("trade_sharpe")
+
     snap = gates.PromotionSnapshot(
         paper_days=paper_trading_days(db),
-        drawdown=float((state.get("drawdown") or {}).get("current_drawdown", 0.0) or 0.0),
+        drawdown=worst_drawdown,
         total_return=total_return,
+        closed_trades=int(state.get("closed_trades", 0) or 0),
+        sharpe=float(sharpe) if sharpe is not None else None,
         paper_return=total_return,
+        # backtest_return stays unset: no baseline is wired yet, which is why
+        # the coherence gate is off by default (see config.backtest_coherence_tolerance).
     )
     return gates.evaluate_gates(snap)
 
@@ -101,13 +114,20 @@ async def stop_all_autonomy_bots(clients: Clients) -> list[dict]:
     return actions
 
 
-async def check_risk_guard(clients: Clients, errors: list) -> list[str]:
+async def check_risk_guard(
+    clients: Clients, errors: list, *, state_name: str = statemachine.TRADING_PAPER
+) -> list[str]:
     """Platform-level circuit breaker (P9): returns a list of breached limits.
 
-    Reads aggregate drawdown and daily PnL from portfolio-engine. A portfolio
-    outage is fail-open (recorded, not a halt) — per-order risk checks in
-    risk-engine still protect each trade; only a real, observed breach halts
-    the whole automation."""
+    Reads aggregate drawdown and daily PnL from portfolio-engine.
+
+    On a portfolio outage the behaviour depends on what is at stake. In paper it
+    is fail-open (recorded, not a halt): per-order risk checks in risk-engine
+    still protect each trade and nothing real is lost. In TRADING_LIVE it is
+    fail-closed — real money must never keep trading while the one component
+    that can see aggregate drawdown is unreachable. That matches how the rest of
+    the platform behaves: risk-engine rejects on an unreachable portfolio, and
+    build_readiness refuses to promote."""
     max_dd = config.max_drawdown()
     max_dl = config.max_daily_loss_fraction()
     if max_dd <= 0 and max_dl <= 0:
@@ -116,6 +136,8 @@ async def check_risk_guard(clients: Clients, errors: list) -> list[str]:
         state = await clients.portfolio.get_state(config.account_id())
     except DownstreamError as exc:
         errors.append({"stage": "risk_guard", "error": str(exc)})
+        if state_name == statemachine.TRADING_LIVE:
+            return [f"portfolio-engine unreachable while trading live: {exc}"]
         return []
 
     drawdown = float((state.get("drawdown") or {}).get("current_drawdown", 0.0) or 0.0)
@@ -259,7 +281,7 @@ async def run_cycle(db: Session, clients: Clients) -> TickResult:
 
     # Global risk guard (P9): a real breach halts the whole automation before
     # any new bot action, stops running bots and requires an admin reset.
-    breaches = await check_risk_guard(clients, errors)
+    breaches = await check_risk_guard(clients, errors, state_name=state)
     if breaches:
         reason = "auto-halt: " + "; ".join(breaches)
         statemachine.halt(db, reason=reason, actor="risk-guard")

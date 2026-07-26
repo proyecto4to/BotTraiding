@@ -70,7 +70,7 @@ async def test_halted_bots_are_stopped(fake_clients, monkeypatch):
     assert all(b["status"] != "running" for b in fake_clients.trading.bots)
 
 
-async def test_portfolio_outage_is_fail_open(fake_clients, monkeypatch):
+async def test_portfolio_outage_is_fail_open_in_paper(fake_clients, monkeypatch):
     monkeypatch.setenv("AUTONOMY_MAX_DRAWDOWN", "0.20")
     fake_clients.portfolio.fail = True  # cannot read risk state
 
@@ -78,10 +78,27 @@ async def test_portfolio_outage_is_fail_open(fake_clients, monkeypatch):
         sm.enable(db)
         result = await controller.run_cycle(db, fake_clients)
 
-    # A transient portfolio outage does NOT halt; it is recorded and trading
-    # continues (per-order risk checks still apply downstream).
+    # A transient portfolio outage does NOT halt paper trading; it is recorded
+    # and trading continues (per-order risk checks still apply downstream).
     assert result.state != sm.HALTED
     assert any(e.get("stage") == "risk_guard" for e in result.errors)
+
+
+async def test_portfolio_outage_halts_when_trading_live(fake_clients, monkeypatch):
+    """Real money must not keep trading while the only component that can see
+    aggregate drawdown is unreachable — the paper fail-open does not carry over."""
+    monkeypatch.setenv("AUTONOMY_MAX_DRAWDOWN", "0.20")
+    fake_clients.portfolio.fail = True
+
+    with _session() as db:
+        sm.enable(db)
+        sm.promote_to_paper(db)
+        sm.promote_to_live(db)
+        result = await controller.run_cycle(db, fake_clients)
+
+    assert result.state == sm.HALTED
+    assert "unreachable" in result.summary
+    assert all(b["status"] != "running" for b in fake_clients.trading.bots)
 
 
 async def test_guard_disabled_when_thresholds_zero(fake_clients, monkeypatch):

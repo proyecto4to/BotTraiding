@@ -71,7 +71,12 @@ _HOP_BY_HOP = {
     "transfer-encoding",
     "upgrade",
 }
-_REQUEST_DROP = _HOP_BY_HOP | {"host", "content-length"}
+# Identity headers are minted by this proxy from a verified token, never
+# accepted from the caller. Without this, a request to a PUBLIC segment (where
+# no token is verified, so nothing overwrites them) would forward whatever
+# x-user-id / x-user-roles the client chose straight to the upstream.
+_IDENTITY_HEADERS = {"x-user-id", "x-user-roles"}
+_REQUEST_DROP = _HOP_BY_HOP | {"host", "content-length"} | _IDENTITY_HEADERS
 # httpx transparently decodes the body, so length/encoding no longer match.
 _RESPONSE_DROP = _HOP_BY_HOP | {"content-length", "content-encoding"}
 
