@@ -279,9 +279,23 @@ def _equity(db: Session, account: PortfolioAccount) -> float:
 
 
 def _update_peak_equity(db: Session, account: PortfolioAccount) -> None:
+    """Track both ends of the equity curve after it moves.
+
+    Called from apply_execution and apply_mark — the only two things that change
+    equity — so the worst drawdown is sampled where it happens rather than
+    whenever somebody happens to read the report. Sampling on read would miss a
+    dip that opened and recovered between two polls, which is exactly the shape
+    of the drawdown the paper->live gate most needs to catch.
+    """
     equity = _equity(db, account)
     if equity > account.peak_equity:
         account.peak_equity = equity
+
+    peak = account.peak_equity
+    if peak > 0:
+        drawdown = (peak - equity) / peak
+        if drawdown > account.max_drawdown:
+            account.max_drawdown = drawdown
 
 
 def _closed_trades(db: Session, account_id: str) -> int:
@@ -409,14 +423,9 @@ def build_drawdown(db: Session, account_id: str) -> DrawdownReport:
     peak = max(account.peak_equity, equity)
     current_dd = ((peak - equity) / peak) if peak > 0 else 0.0
 
-    # Ratchet the worst drawdown ever seen. Reading the report is what samples
-    # it, which is enough: risk-engine and the autonomy guard poll this on every
-    # cycle, so a dip between two polls of a live account is not missed in
-    # practice, and the value can only ever go up.
-    if current_dd > account.max_drawdown:
-        account.max_drawdown = current_dd
-        db.commit()
-
+    # Pure read: the worst drawdown is recorded by _update_peak_equity when the
+    # equity actually moves, not here. max() covers the one case a stored value
+    # cannot: an account whose marks moved without any write going through.
     positions = _open_positions(db, account_id)
     unrealized = sum(
         p.quantity * (_mark_for(account_id, p) - p.average_price) for p in positions
@@ -430,7 +439,7 @@ def build_drawdown(db: Session, account_id: str) -> DrawdownReport:
         equity=equity,
         peak_equity=peak,
         current_drawdown=current_dd,
-        max_drawdown=account.max_drawdown,
+        max_drawdown=max(account.max_drawdown, current_dd),
         floating_drawdown=floating_dd,
     )
 

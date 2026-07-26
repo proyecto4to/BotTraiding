@@ -70,6 +70,22 @@ def test_fresh_account_has_no_drawdown(client):
     assert dd["floating_drawdown"] == pytest.approx(0.0)
 
 
+def test_max_drawdown_is_recorded_without_anyone_reading_it(client):
+    """The dip must be caught when equity moves, not when the report is read.
+
+    If sampling only happened on read, a crash that opened and recovered between
+    two polls would vanish — and that is precisely the drawdown the paper->live
+    gate exists to catch. No /drawdown call happens until the very end here."""
+    _buy(client, "AAPL", 100, 100)
+    client.post(f"/portfolio/{ACC}/mark", json={"prices": {"AAPL": 110}})  # peak 101000
+    client.post(f"/portfolio/{ACC}/mark", json={"prices": {"AAPL": 50}})   # deep dip
+    client.post(f"/portfolio/{ACC}/mark", json={"prices": {"AAPL": 110}})  # recovered
+
+    dd = client.get(f"/portfolio/{ACC}/drawdown").json()
+    assert dd["current_drawdown"] == pytest.approx(0.0)
+    assert dd["max_drawdown"] == pytest.approx((101000 - 95000) / 101000)
+
+
 def test_max_drawdown_survives_a_recovery(client):
     """A crash that recovers must still count: promoting to live on
     current_drawdown alone would wave through a strategy that nearly blew up."""

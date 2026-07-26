@@ -35,6 +35,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 
 from app.proxy import get_http_client, upstream_base_url
+from app.rate_limit import get_rate_limiter
 
 router = APIRouter(prefix="/api/session", tags=["session"])
 
@@ -123,6 +124,24 @@ def _require_csrf(request: Request) -> None:
         )
 
 
+def _rate_limit(request: Request) -> None:
+    """Same per-IP throttle the /api/* proxy applies.
+
+    These routes are gateway-owned, so they never pass through the proxy's
+    catch-all and would otherwise be the only unthrottled path to a password
+    check. auth-service has its own brute-force lock, but it keys on
+    ``request.client.host`` — which behind the gateway is the gateway for every
+    caller — so this is where per-client throttling actually happens.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    if not get_rate_limiter().allow(f"ip:{client_ip}"):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded",
+            headers={"Retry-After": "1"},
+        )
+
+
 async def _post_auth(path: str, payload: dict[str, Any]) -> tuple[int, Any]:
     client = await get_http_client()
     try:
@@ -159,16 +178,33 @@ def _login_result(
     return body
 
 
+async def _json_body(request: Request) -> dict[str, Any]:
+    """Parse the body, turning malformed JSON into a 422 rather than a 500."""
+    try:
+        payload = await request.json()
+    except Exception as exc:  # noqa: BLE001 - any decode failure is the same 422
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid JSON body"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Expected a JSON object"
+        )
+    return payload
+
+
 @router.post("/login")
 async def login(request: Request, response: Response) -> Any:
-    payload = await request.json()
+    _rate_limit(request)
+    payload = await _json_body(request)
     status_code, body = await _post_auth("login", payload)
     return _login_result(response, status_code, body)
 
 
 @router.post("/login/mfa")
 async def login_mfa(request: Request, response: Response) -> Any:
-    payload = await request.json()
+    _rate_limit(request)
+    payload = await _json_body(request)
     status_code, body = await _post_auth("login/mfa", payload)
     return _login_result(response, status_code, body)
 
@@ -176,6 +212,7 @@ async def login_mfa(request: Request, response: Response) -> Any:
 @router.post("/refresh")
 async def refresh(request: Request, response: Response) -> Any:
     """Rotate the session from the cookie alone; the body carries no token."""
+    _rate_limit(request)
     _require_csrf(request)
 
     refresh_token = request.cookies.get(REFRESH_COOKIE)
@@ -209,6 +246,7 @@ async def logout(request: Request, response: Response) -> Response:
 
     The cookies are cleared even if auth-service is unreachable: a user asking
     to log out must end up logged out locally regardless."""
+    _rate_limit(request)
     _require_csrf(request)
 
     refresh_token = request.cookies.get(REFRESH_COOKIE)

@@ -191,6 +191,40 @@ def test_logout_clears_the_session_even_if_auth_service_is_down(client) -> None:
 
 
 @respx.mock
+def test_login_is_rate_limited_per_ip(client, monkeypatch) -> None:
+    """Regression: these routes are gateway-owned and never pass through the
+    /api/* proxy, so without this they were the one unthrottled path to a
+    password check. auth-service's own lock keys on the socket peer, which
+    behind the gateway is the gateway for everyone."""
+    from app import rate_limit
+
+    monkeypatch.setattr(
+        rate_limit,
+        "_rate_limiter",
+        rate_limit.TokenBucketRateLimiter(capacity=2, refill_per_second=0),
+    )
+    respx.post(f"{AUTH}/login").mock(
+        return_value=httpx.Response(401, json={"detail": "Invalid credentials"})
+    )
+
+    seen = [
+        client.post("/api/session/login", json={"username": "u", "password": f"guess{i}"}).status_code
+        for i in range(4)
+    ]
+    assert 429 in seen, f"no throttling: {seen}"
+
+
+@respx.mock
+def test_malformed_body_is_a_422_not_a_500(client) -> None:
+    response = client.post(
+        "/api/session/login",
+        content=b"{not json",
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422
+
+
+@respx.mock
 def test_bad_credentials_surface_as_the_upstream_status(client) -> None:
     respx.post(f"{AUTH}/login").mock(
         return_value=httpx.Response(401, json={"detail": "Invalid credentials"})
