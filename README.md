@@ -67,6 +67,30 @@ Then:
 Services with persistence run their Alembic migrations automatically at
 container start. Every service exposes `/health`, `/ready` and `/metrics`.
 
+## Arranque local en Windows (sin Docker)
+
+```powershell
+scripts\start-bottrading.ps1          # los 16 servicios + frontend
+scripts\abrir-bottrading.ps1          # arranca lo que falte y abre el panel
+scripts\stop-bottrading.ps1           # para backend y frontend
+```
+
+Los secretos (JWT y operador) se generan una vez por máquina en `.local/`
+—gitignored— y la contraseña queda en `.local/CREDENCIALES.txt`.
+
+**Arranque automático al iniciar sesión** (recomendado):
+
+```powershell
+scripts\instalar-arranque-automatico.ps1            # registrar
+scripts\instalar-arranque-automatico.ps1 -Quitar    # desactivar
+```
+
+No es cosmético: el historial que autoriza el paso a dinero real solo se
+acumula mientras el bot corre. `min_paper_days` cuenta **días con actividad
+real**, no días de calendario, así que un bot que solo vive cuando alguien
+hace clic no avanza hacia la promoción — que es exactamente lo que debe pasar.
+El stack ocupa unos 390 MB.
+
 To work on a single service without Docker:
 
 ```bash

@@ -18,9 +18,8 @@ going. trading-engine + risk-engine still enforce risk on every resulting order
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import allocation, config, events, gates, governor, statemachine
@@ -36,18 +35,25 @@ def _bot_name(symbol: str, strategy_key: str) -> str:
 
 
 def paper_trading_days(db: Session) -> float:
-    """Days since the automation first entered TRADING_PAPER (from the decision
-    log). 0 if it never has."""
-    first = db.execute(
-        select(AutonomyDecisionRow.created_at)
-        .where(AutonomyDecisionRow.state == statemachine.TRADING_PAPER)
-        .order_by(AutonomyDecisionRow.created_at.asc())
-        .limit(1)
+    """Number of distinct days on which the automation actually ran in paper.
+
+    Counts days with at least one TRADING_PAPER decision, NOT the calendar span
+    since the first one. Subtracting two dates cannot tell 14 days of trading
+    from 14 days of mostly-off: a laptop that ran the stack for a couple of
+    hours across two weeks reported "14 days of track record" while having
+    almost no operating time behind it, and the gate would have opened the door
+    to real money on the strength of the wall clock alone.
+
+    Days are coarse on purpose — one day is one day whether the bot ran an hour
+    or twenty-four. Intensity is `min_closed_trades`'s job; this gate only
+    answers "for how many days has this thing been trading at all".
+    """
+    count = db.execute(
+        select(func.count(func.distinct(func.date(AutonomyDecisionRow.created_at)))).where(
+            AutonomyDecisionRow.state == statemachine.TRADING_PAPER
+        )
     ).scalar_one_or_none()
-    if first is None:
-        return 0.0
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    return max(0.0, (now - first).total_seconds() / 86400.0)
+    return float(count or 0)
 
 
 async def build_readiness(db: Session, clients: Clients) -> gates.GateReport:

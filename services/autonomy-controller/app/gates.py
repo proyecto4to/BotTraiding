@@ -15,7 +15,7 @@ from . import config
 
 @dataclass
 class PromotionSnapshot:
-    paper_days: float = 0.0
+    paper_days: float = 0.0       # DAYS TRADED, not calendar span (see controller)
     drawdown: float = 0.0          # WORST drawdown of the paper period (fraction)
     total_return: float = 0.0      # (equity - starting) / starting
     closed_trades: int = 0         # completed round trips behind the record
@@ -60,7 +60,7 @@ def evaluate_gates(
         GateResult(
             "min_paper_days",
             snap.paper_days >= min_days,
-            f"{snap.paper_days:.1f}d paper vs {min_days:.0f}d required",
+            f"{snap.paper_days:.0f} days traded vs {min_days:.0f} required",
         ),
         GateResult(
             "max_drawdown",
