@@ -131,6 +131,19 @@ foreach ($svc in $services) {
         # asi que localmente se usa create_all sobre los modelos).
         & $python -c "import sys; sys.path.insert(0, r'$svcDir'); from app.db import engine; import app.models as m; m.Base.metadata.create_all(bind=engine)" 2>$null
         if ($LASTEXITCODE -ne 0) { Write-Warning "$name : fallo create_all (endpoints de DB pueden dar 500)" }
+
+        # create_all crea las tablas pero no los datos que siembra la migracion
+        # Alembic, asi que sin esto la pagina de Mercados sale vacia con
+        # "los mercados se inicializan mediante la migracion del gateway".
+        # Idempotente: solo inserta lo que falte.
+        if ($name -eq 'gateway') {
+            $seeded = & $python -c "import sys; sys.path.insert(0, r'$svcDir'); from app.db import SessionLocal; from app.seed_data import seed_markets; db = SessionLocal(); print(seed_markets(db)); db.close()" 2>$null
+            if ($LASTEXITCODE -eq 0 -and $seeded -and [int]$seeded -gt 0) {
+                Write-Host "  gateway: $seeded mercados sembrados"
+            } elseif ($LASTEXITCODE -ne 0) {
+                Write-Warning "gateway : fallo la siembra de mercados (la pagina de Mercados saldra vacia)"
+            }
+        }
     } else {
         Remove-Item Env:\DATABASE_URL -ErrorAction SilentlyContinue
     }

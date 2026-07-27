@@ -44,3 +44,35 @@ MARKET_SEED: list[dict] = [
     {"name": "Bonds", "code": "BONDS", "asset_class": "bond", "trading_hours": _US_EQUITY_HOURS},
     {"name": "Indices", "code": "INDICES", "asset_class": "index", "trading_hours": _US_EQUITY_HOURS},
 ]
+
+
+def seed_markets(db) -> int:
+    """Insert any missing market rows. Returns how many were added.
+
+    The Alembic migration (0001) seeds these against Postgres, but the local
+    Windows start-up path creates tables with `create_all` instead — the
+    migrations use Postgres-specific types — so without this the `markets`
+    table stays empty and the dashboard's Markets page reports "no markets
+    configured". Matching on `name` (unique) makes it safe to run on every
+    boot; existing rows, including any an admin disabled, are left untouched.
+    """
+    from app.models import Market
+
+    existing = {name for (name,) in db.query(Market.name).all()}
+    added = 0
+    for market in MARKET_SEED:
+        if market["name"] in existing:
+            continue
+        db.add(
+            Market(
+                name=market["name"],
+                code=market["code"],
+                asset_class=market["asset_class"],
+                enabled=True,
+                trading_hours=market["trading_hours"],
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    return added
